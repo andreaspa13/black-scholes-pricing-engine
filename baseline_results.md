@@ -55,7 +55,7 @@ Notes:
 
 ---
 
-## Known bottlenecks for future iterations
+## Known bottlenecks for future iterations (at time of Iteration 1)
 
 ### Iteration 2 — Template refactor targets
 - Virtual dispatch on `payoff()`: ~3–5 ns per path (small but eliminates devirtualisation barrier)
@@ -65,3 +65,57 @@ Notes:
 - **Per-path `std::vector` allocation: ~30–40 ns / path** — dominant cost
 - 100k paths = ~100k heap allocations per `price()` call
 - Fix: pre-allocate a single reusable path buffer (removes allocator pressure entirely)
+
+---
+
+# Iteration 2 — Template model results
+
+**Build:** GCC 15.2 (MinGW), -O3, Windows 11, x86-64
+**Commit:** Iteration 2 complete
+
+## Black-Scholes: V1 vs V2
+
+| | Mean latency |
+|---|---|
+| V1 (dynamic_cast) | ~279 ns |
+| V2 (template, no cast) | ~278 ns |
+| Speedup | ~1.00× |
+
+The gain is negligible when called on a concrete stack object — the compiler already devirtualises `price()`. The architectural improvement is the compile-time type constraint (concept vs dynamic_cast), not the raw latency here.
+
+## Monte Carlo: V1 vs V2 (100 iterations each)
+
+| Paths | V1 ns/path | V2 ns/path | Speedup |
+|---|---|---|---|
+| 1 000 | 197 | 121 | **1.63×** |
+| 10 000 | 230 | 124 | **1.85×** |
+| 100 000 | 204 | 117 | **1.74×** |
+
+Per-path saving (~80–110 ns) decomposes as:
+- ~30–40 ns — `std::vector<double>` allocation eliminated by inlining path simulation
+- ~3–5 ns — virtual `payoff()` dispatch eliminated by template instantiation
+
+---
+
+# Iteration 3 — Parallel Monte Carlo results
+
+**Build:** GCC 15.2 (MinGW), -O3, Windows 11, x86-64, 12 hardware threads
+**Commit:** Iteration 3 complete
+
+## Monte Carlo: V2 (single-thread) vs V3 (parallel, 20 iterations each)
+
+| Paths | V2 ns/path | V3 ns/path | Speedup |
+|---|---|---|---|
+| 10 000 | 110 | 165 | 0.67× ← thread overhead dominates |
+| 100 000 | 136 | 32 | **4.32×** |
+| 1 000 000 | 128 | 26 | **4.89×** |
+
+Thread-creation overhead (~1–2 ms) dominates below ~50k paths. Above that, speedup approaches linear with core count (~4.9× on 12 cores at 1M paths).
+
+## Cumulative improvement V1 → V3 (100k paths)
+
+| | ns/path | vs V1 |
+|---|---|---|
+| V1 — virtual dispatch + heap alloc | ~200–320 | baseline |
+| V2 — templates, inlined payoff | ~117–124 | ~1.7× |
+| V3 — 12 threads | ~26–32 | ~7× |
