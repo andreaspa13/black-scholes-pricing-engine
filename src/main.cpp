@@ -9,6 +9,9 @@
 #include "v2/BlackScholesV2.h"
 #include "v2/MonteCarloV2.h"
 
+// ── Iteration 3: parallel Monte Carlo ─────────────────────────────────────────
+#include "v3/MonteCarloV3.h"
+
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -328,6 +331,33 @@ void runTests() {
         checkMC("TC26 V2 MC price within 5σ of V1 MC", v2MC.price, v1MC.price, v2MC.stdErr, 5.0);
     }
 
+    // ── TC27–TC29: Iteration 3 correctness ───────────────────────────────────
+    {
+        MarketData m{ 100.0, 0.05, 0.20 };
+        EuropeanOption call(100.0, 1.0, OptionType::Call);
+        const double bsPrice = bs.price(call, m).price;
+
+        // TC27: V3 single-thread matches V2 to within MC noise
+        // Same path count, single thread — should give statistically
+        // consistent results (different seed strategy → different sequence).
+        v3::MonteCarloModel mcV3_1t(500'000, 1, 42, VarianceReduction::None, 1);
+        const auto v3_1t = mcV3_1t.price(call, m);
+        checkMC("TC27 V3 (1 thread) call vs BS", v3_1t.price, bsPrice, v3_1t.stdErr, 3.0);
+
+        // TC28: V3 multi-thread converges to BS (same statistical test)
+        v3::MonteCarloModel mcV3_mt(500'000, 1, 42);  // hardware thread count
+        const auto v3_mt = mcV3_mt.price(call, m);
+        checkMC("TC28 V3 (N threads) call vs BS", v3_mt.price, bsPrice, v3_mt.stdErr, 3.0);
+
+        // TC29: V3 stdErr is in the right ballpark (within 2x of V2 stderr)
+        // Different seeds across threads produce a different variance estimate;
+        // it should be in the same order of magnitude as V2.
+        v2::MonteCarloModel mcV2ref(500'000, 1, 42);
+        const auto v2ref = mcV2ref.price(call, m);
+        check("TC29 V3 stdErr within 2x of V2",
+              v3_mt.stdErr < 2.0 * v2ref.stdErr ? 1.0 : 0.0, 1.0, 0.5);
+    }
+
     // ── Summary ───────────────────────────────────────────────────────────────
     std::cout << "\n"
               << g_results.passed << "/" << (g_results.passed + g_results.failed)
@@ -467,6 +497,51 @@ void runV2Benchmarks() {
     }
 }
 
+// ── Iteration 3 benchmarks ────────────────────────────────────────────────────
+// V2 (single-threaded) vs V3 (parallel) on 100k and 1M paths.
+// Expected speedup: near-linear with core count for large N.
+// Thread-creation overhead dominates at small N — the crossover is visible here.
+
+void runV3Benchmarks() {
+    const int nThreads = static_cast<int>(
+        std::max(1u, std::thread::hardware_concurrency()));
+
+    std::cout << "=== Iteration 3 parallel benchmarks ("
+              << nThreads << " hardware threads) ===\n\n";
+
+    MarketData market { .spot=100.0, .riskFreeRate=0.05, .volatility=0.20 };
+    EuropeanOption call(100.0, 1.0, OptionType::Call);
+
+    for (int paths : { 10'000, 100'000, 1'000'000 }) {
+        v2::MonteCarloModel mcV2(paths, 1, 42);
+        v3::MonteCarloModel mcV3(paths, 1, 42);
+
+        const std::string label = std::to_string(paths) + " paths (20 iters)";
+
+        auto r2 = Benchmark::run("MC V2 " + label, [&]() {
+            auto result = mcV2.price(call, market);
+            (void)result.price;
+        }, 20);
+
+        auto r3 = Benchmark::run("MC V3 " + label, [&]() {
+            auto result = mcV3.price(call, market);
+            (void)result.price;
+        }, 20);
+
+        Benchmark::print(r2);
+        std::cout << "  implied per-path : "
+                  << std::fixed << std::setprecision(1)
+                  << (r2.meanNs / paths) << " ns\n";
+        Benchmark::print(r3);
+        std::cout << "  implied per-path : "
+                  << std::fixed << std::setprecision(1)
+                  << (r3.meanNs / paths) << " ns\n";
+        std::cout << "  parallel speedup : "
+                  << std::fixed << std::setprecision(2)
+                  << (r2.meanNs / r3.meanNs) << "x\n\n";
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -474,5 +549,6 @@ int main() {
     runSanityCheck();
     runBenchmarks();
     runV2Benchmarks();
+    runV3Benchmarks();
     return g_results.failed > 0 ? 1 : 0;
 }

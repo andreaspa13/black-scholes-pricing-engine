@@ -32,6 +32,9 @@ target_include_directories(options_engine PUBLIC include)
 # ── Executable: main benchmark + sanity check ─────────────────────────────────
 add_executable(options_main src/main.cpp)
 target_link_libraries(options_main PRIVATE options_engine)
+if(WIN32)
+    target_link_libraries(options_main PRIVATE -lpthread)
+endif()
 
 # ── Build type defaults ───────────────────────────────────────────────────────
 # Default to Release for benchmarking. Use -DCMAKE_BUILD_TYPE=Debug for
