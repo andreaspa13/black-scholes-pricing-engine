@@ -1,0 +1,30 @@
+# Claude Code internal
+.claude/
+
+# Build output
+build/
+*.exe
+*.o
+*.obj
+*.a
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+
+# IDE / editor
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
