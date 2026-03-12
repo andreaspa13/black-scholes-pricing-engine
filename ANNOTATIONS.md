@@ -3,6 +3,8 @@
 Line-by-line (or block-by-block) annotations for every source file in the project.
 Updated with every code change. This is the primary learning artifact.
 
+**Last updated:** post-GUI + HTTP server additions (server.cpp, gui.html, expanded test suite)
+
 ---
 
 ## Table of Contents
@@ -20,7 +22,9 @@ Updated with every code change. This is the primary learning artifact.
 11. [MonteCarloModel.cpp](#montecarlomodelcpp)
 12. [Benchmark.h](#benchmarkh)
 13. [main.cpp](#maincpp)
-14. [baseline_results.md](#baseline_resultsmd)
+14. [server.cpp](#servercpp) ← added
+15. [gui.html](#guihtml) ← added
+16. [baseline_results.md](#baseline_resultsmd)
 
 ---
 
@@ -1025,4 +1029,149 @@ Key figures:
 
 ---
 
-*End of ANNOTATIONS.md — Iteration 1*
+## server.cpp
+
+The HTTP server that bridges the C++ pricing engine to the browser GUI.
+Uses two single-header vendor libraries: **cpp-httplib** (HTTP) and **nlohmann/json** (JSON).
+
+```cpp
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#define _WIN32_WINNT 0x0A00
+```
+Three Windows-specific guards that must appear before any Windows headers (which httplib.h
+pulls in transitively). `WIN32_LEAN_AND_MEAN` strips rarely-used Win32 APIs from the
+inclusion, significantly reducing compile time. `NOMINMAX` prevents Windows.h from defining
+`min`/`max` macros that would clash with `std::min`/`std::max` and break `<algorithm>` and
+`json.hpp`. `_WIN32_WINNT 0x0A00` targets Windows 10 — cpp-httplib v0.37 uses
+`CreateFile2()` which requires at least Windows 10 API surface; without this define the
+compiler raises an error.
+
+```cpp
+void setCors(httplib::Response& res) { ... }
+```
+Cross-Origin Resource Sharing (CORS) headers added to every response. Browsers enforce the
+Same-Origin Policy: a page served from `file://` is a different origin than `localhost:18080`,
+so any `fetch()` call would be blocked by default. The three headers (`Allow-Origin: *`,
+`Allow-Methods`, `Allow-Headers`) satisfy the browser's preflight check. Without them, the
+GUI cannot contact the server even though both run on the same machine.
+
+```cpp
+std::vector<double> generateVisPath(double S, double r, double sigma,
+                                    double T, int steps, std::mt19937& rng)
+```
+Generates one GBM price path for display purposes only. This is intentionally separate from
+`MonteCarloModel::generatePath` (which is `private`) because the use-case differs: the
+display needs a small number of paths with step-level resolution, while the pricer uses
+single-step exact discretisation. The function takes the RNG by reference so paths share
+state and look visually varied rather than all starting from the same seed position.
+
+```cpp
+std::vector<ConvPoint> buildConvergenceSeries(...)
+```
+Runs a standalone MC simulation with a fixed seed (42) and records the running price
+estimate at 20 log-spaced checkpoints between path 50 and `maxN`. Log-spacing is chosen
+because MC error decays as 1/√N — equal spacing on a log scale makes the improvement
+curve appear linear on a log-x chart, which is the standard way to visualise MC convergence.
+The `ConvPoint` struct carries `{n, price, se}` (path count, running estimate, running
+standard error).
+
+```cpp
+svr.Options("/price", ...)  // CORS preflight
+svr.Post("/price", ...)     // main handler
+```
+`OPTIONS` is the HTTP method browsers use for a CORS preflight request — they send it
+automatically before the real `POST` to check if the server allows cross-origin requests.
+The `POST` handler is the core of the server: it deserialises the JSON body, validates
+inputs, instantiates `BlackScholesModel` and `MonteCarloModel` per-request (ensuring
+thread-safe RNG state), runs both pricers, builds the convergence series and visual paths,
+then serialises the response as JSON.
+
+**Per-request instantiation pattern:**
+```cpp
+MonteCarloModel mc(numPaths, 1, 42);
+```
+`MonteCarloModel` holds a `mutable std::mt19937` which is not thread-safe. Creating a
+fresh instance per request ensures each request has its own independent RNG. The fixed
+seed 42 makes results reproducible: the same inputs always return the same MC price, which
+is useful for debugging and testing.
+
+**Response schema:**
+```json
+{
+  "bs":         { "price", "delta", "stdErr", "d1", "d2" },
+  "bsOther":    { "price", "delta", "stdErr", "d1", "d2" },
+  "mc":         { "price", "stdErr" },
+  "convergence": [{ "n", "price", "se" }, ...],
+  "paths":      [[100.0, 101.3, ...], ...]
+}
+```
+`bsOther` carries the BS price for the complementary option type (if the request is for a
+call, `bsOther` is the put price). This lets the GUI compute put-call parity without making
+a second request. `d1`/`d2` are re-derived inline in `server.cpp` because `PricingResult`
+doesn't store them — they are intermediate values, not part of the public pricing interface.
+
+---
+
+## gui.html
+
+A single-file interactive GUI served as a static `file://` page. All layout, styling, and
+logic are self-contained — no build step, no framework, no server required for the HTML
+itself. The C++ server is only needed when "Run Pricing" is clicked.
+
+**Architecture:**
+The GUI is split into three logical layers:
+1. **Controls** (left panel) — stepper inputs for S, K, r, σ, T, N, display paths; Call/Put toggle; Run and Explain buttons.
+2. **Results** (right panel) — BS result card, MC result card, put-call parity bar, GBM path canvas, MC convergence canvas.
+3. **Heatmap section** (below) — 2×2 grid of BS price and P&L surfaces computed in JS.
+
+**Server connection (`runAll`):**
+```javascript
+async function runAll() {
+  const response = await fetch('http://localhost:18080/price', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ S, K, r, sigma, T, type, numPaths, numVisPaths })
+  });
+  res = await response.json();
+  // populate UI from res.bs, res.mc, res.convergence, res.paths
+}
+```
+`runAll` is `async` so the `await fetch(...)` doesn't block the browser's event loop.
+The error banner (`#server-error`) is shown if the server is unreachable, giving a clear
+actionable message rather than a silent failure.
+
+**JS-only BS calculation (heatmap only):**
+```javascript
+function bsCalc(S, K, r, sigma, T, type) { ... }
+```
+A lightweight JS reimplementation of the BS formula used exclusively for the 40×30 heatmap
+grid (1,200 evaluations per render). This is acceptable because it's purely for display —
+the actual pricing always goes through the C++ server. Using the server for the heatmap
+would require 1,200 HTTP round-trips or a batch endpoint, which is unnecessary overhead
+for a visual feature.
+
+**Heatmap rendering:**
+Each of the four canvases (Call Price, Put Price, Call P&L, Put P&L) is drawn by
+`drawHeatmap()`. Key design decisions:
+- **Square canvas via JS**: `canvas.style.height = canvas.offsetWidth + 'px'` forces a
+  square before reading pixel dimensions. CSS `aspect-ratio` is unreliable in flex containers
+  on some browsers because the intrinsic size calculation races with layout.
+- **Cell value labels**: `strokeText` (dark outline) followed by `fillText` (white fill)
+  gives readable labels on both dark and light cell backgrounds without needing to compute
+  per-cell contrast.
+- **Vertical colour bar**: rendered by `drawLegend()`, which receives the heatmap's CSS
+  pixel height as an explicit argument so both canvases are exactly the same height.
+- **Crosshair**: drawn at the current S/σ from `lastResults` so the user can see where
+  their active pricing sits on each surface.
+
+**Colour scales:**
+- Price heatmaps: dark navy → deep blue → bright blue → gold. Perceptually progressive,
+  colourblind-safe, matches the dark theme.
+- P&L heatmaps: deep red → white (at PnL=0) → deep green. The white midpoint is the
+  breakeven line; red/green carry their natural financial meaning (loss/profit) which is
+  unambiguous in this context.
+
+---
+
+*End of ANNOTATIONS.md*

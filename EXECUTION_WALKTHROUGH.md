@@ -1,4 +1,4 @@
-# EXECUTION_WALKTHROUGH.md — Runtime Flow, Iteration 1
+# EXECUTION_WALKTHROUGH.md — Runtime Flow
 
 This document traces execution from program entry to final output, in the exact order
 things happen at runtime. It is not about what code looks like statically — it is about
@@ -11,8 +11,12 @@ This document explains *when each line runs and why it runs in that order*.
 
 ## Overview
 
+Two executables are built from this project. Their execution flows are documented separately.
+
+### options_main (benchmark + test binary)
 ```
 main()
+ ├── runTests()              ← 20 PASS/FAIL assertions
  ├── runSanityCheck()
  │    ├── Construct: MarketData, EuropeanOption x2, BlackScholesModel, MonteCarloModel
  │    ├── bs.price(call)  →  BlackScholesModel::price()  →  N() x4
@@ -25,6 +29,19 @@ main()
       └── for paths in {1k, 10k, 100k}:
            ├── Construct MonteCarloModel(paths)
            └── Benchmark::run(MC, 100 iterations)
+```
+
+### options_server (HTTP pricing server)
+```
+main()
+ └── svr.listen("localhost", 18080)       ← blocks, event loop
+      └── on POST /price:
+           ├── json::parse(req.body)
+           ├── BlackScholesModel bs  →  bs.price(call) + bs.price(put)
+           ├── MonteCarloModel mc    →  mc.price(call)
+           ├── buildConvergenceSeries()
+           ├── generateVisPath() × numVisPaths
+           └── json response → res.set_content()
 ```
 
 ---
@@ -477,4 +494,106 @@ After Iteration 3 (no alloc):  target ~30–40 ns.
 
 ---
 
-*End of EXECUTION_WALKTHROUGH.md — Iteration 1*
+## HTTP Server Runtime Flow (options_server)
+
+### Startup
+
+```
+svr.listen("localhost", 18080)
+```
+cpp-httplib creates a TCP socket bound to port 18080, calls `listen()`, then enters an
+internal `select()`/`poll()` loop waiting for incoming connections. The process blocks here
+until Ctrl+C. The server is single-threaded by default in this configuration — one request
+is handled at a time, which is sufficient for a local GUI.
+
+### Per-request flow: POST /price
+
+**1. CORS preflight (OPTIONS)**
+
+Before the real POST, the browser automatically sends a preflight OPTIONS request to check
+if the server allows cross-origin requests. The OPTIONS handler sets the three CORS headers
+and returns HTTP 200 immediately — no pricing work is done.
+
+**2. JSON deserialisation**
+
+```cpp
+const auto body = json::parse(req.body);
+const double S = body.at("S").get<double>();
+```
+`json::parse` parses the UTF-8 body string into a DOM tree. `at()` throws
+`json::out_of_range` if a key is missing — this propagates to the outer `try/catch` which
+returns HTTP 400 with the error message. `body.value("numPaths", 10000)` uses a default
+for optional fields.
+
+**3. Input validation**
+
+```cpp
+if (S <= 0 || K <= 0 || sigma <= 0 || T <= 0)
+    throw std::invalid_argument("...");
+```
+Checked before any model construction. Negative or zero values for these parameters would
+produce NaN/Inf or throw inside BS/MC, so rejecting them early gives a cleaner error.
+
+**4. Black-Scholes pricing (×2)**
+
+Two `BlackScholesModel` instances are constructed (or one is reused — it is stateless):
+one for the requested option type, one for the complementary type. Both are needed so the
+GUI can display put-call parity without a second request. `d1`/`d2` are re-derived inline
+because `PricingResult` stores only the output quantities (price, delta, stdErr), not
+intermediate values.
+
+**5. Monte Carlo pricing**
+
+```cpp
+MonteCarloModel mc(numPaths, 1, 42);
+const PricingResult mcRes = mc.price(opt, market);
+```
+A fresh `MonteCarloModel` is constructed per request with seed 42. The fixed seed makes
+results reproducible: the same inputs always return the same MC price. `mc.price()` calls
+`generatePath()` N times, each allocating a `std::vector<double>` (Iteration 3 target for
+removal), and accumulates payoffs into a Bessel-corrected variance estimate.
+
+**6. Convergence series**
+
+`buildConvergenceSeries()` runs a second independent MC simulation (also seed 42) and
+records the running estimate at 20 log-spaced checkpoints. This is separate from step 5
+because the convergence chart needs intermediate values, not just the final result.
+
+**7. Visual GBM paths**
+
+```cpp
+std::mt19937 visRng(99);  // different seed from MC
+for (int i = 0; i < numVisPaths; ++i)
+    pathsJson.push_back(generateVisPath(S, r, sigma, T, 100, visRng));
+```
+Seed 99 (different from MC seed 42) is used so the visual paths look distinct from the
+paths implicitly simulated during pricing. Each path has 101 points (t=0 through t=T in
+100 steps), giving a smooth curve on the canvas.
+
+**8. JSON serialisation**
+
+`response.dump()` serialises the nested JSON object to a UTF-8 string. The
+`Content-Type: application/json` header and CORS headers are set before `set_content()`.
+The entire response is sent as a single body — no streaming.
+
+### Full request timeline (typical)
+
+```
+Browser fetch()                           ~0 ms  (network: loopback)
+  └── OPTIONS preflight                   ~0 ms
+  └── POST /price
+       ├── json::parse()                  ~0.1 ms
+       ├── BS call + put prices           ~0.001 ms  (deterministic, <1µs)
+       ├── MC pricing (10k paths)         ~2–5 ms    (dominant cost)
+       ├── buildConvergenceSeries (10k)   ~2–5 ms
+       ├── generateVisPath × 50           ~0.5 ms
+       └── json::dump() + send            ~0.1 ms
+Total round-trip                          ~5–12 ms
+```
+
+The MC simulation and convergence series each scale linearly with path count — the two
+together account for ~95% of total request latency.
+
+---
+
+*End of EXECUTION_WALKTHROUGH.md*
