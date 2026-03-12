@@ -3,7 +3,7 @@
 Line-by-line (or block-by-block) annotations for every source file in the project.
 Updated with every code change. This is the primary learning artifact.
 
-**Last updated:** post-GUI + HTTP server additions (server.cpp, gui.html, expanded test suite)
+**Last updated:** Iteration 3 complete — Greeks, implied volatility, antithetic variates, V2 (C++20 concepts), V3 (parallel MC)
 
 ---
 
@@ -25,6 +25,12 @@ Updated with every code change. This is the primary learning artifact.
 14. [server.cpp](#servercpp) ← added
 15. [gui.html](#guihtml) ← added
 16. [baseline_results.md](#baseline_resultsmd)
+17. [ImpliedVol.h](#impliedvolh) ← added
+18. [ImpliedVol.cpp](#impliedvolcpp) ← added
+19. [v2/Concepts.h](#v2conceptsh) ← added
+20. [v2/BlackScholesV2.h](#v2blackscholesv2h) ← added
+21. [v2/MonteCarloV2.h](#v2montecarlов2h) ← added
+22. [v3/MonteCarloV3.h](#v3montecarlов3h) ← added
 
 ---
 
@@ -109,10 +115,13 @@ add_library(options_engine
     src/options/EuropeanOption.cpp
     src/models/BlackScholesModel.cpp
     src/models/MonteCarloModel.cpp
+    src/utils/ImpliedVol.cpp
 )
 ```
 Creates a static library (default when neither STATIC nor SHARED is specified) from the
-three implementation files. Packaging the pricing engine as a library has several benefits:
+implementation files. `ImpliedVol.cpp` was added in the Greeks/IV iteration — it contains
+the Newton-Raphson and bisection solver that backs the `/iv` HTTP endpoint. Packaging
+the pricing engine as a library has several benefits:
 - `main.cpp` links against it without recompiling the engine code when only `main.cpp`
   changes.
 - In a real project, a test binary would also link against the same library, ensuring
@@ -136,12 +145,21 @@ that the library was built with.
 ```
 add_executable(options_main src/main.cpp)
 target_link_libraries(options_main PRIVATE options_engine)
+if(WIN32)
+    target_link_libraries(options_main PRIVATE -lpthread)
+endif()
 ```
 Creates the executable and links the engine library into it. `PRIVATE` on `target_link_libraries`
 means: "link `options_engine` into `options_main` but do not propagate this dependency
 to anything that links against `options_main`." Since `options_main` is an executable
 (not a library), nothing links against it, so `PRIVATE` vs `PUBLIC` makes no practical
 difference here — but `PRIVATE` is the correct choice by convention.
+
+The `if(WIN32) -lpthread` block is required for MinGW on Windows: `std::thread` uses
+pthreads under the hood via the winpthreads library, and MinGW's linker does not pull it
+in automatically. On Linux with GCC, the equivalent is `-pthread` (compile flag, not just
+linker flag, which also defines `_REENTRANT`). The Windows-only `if` avoids breaking
+Linux builds where `-lpthread` may not be needed or may be handled differently.
 
 ```
 if(NOT CMAKE_BUILD_TYPE)
@@ -229,12 +247,16 @@ transitive dependencies.
 ```cpp
 struct PricingResult {
     double price   = 0.0;
-    double stderr  = 0.0;
-    double delta   = 0.0;
-    std::string modelName;
+    double stdErr  = 0.0;   // MC convergence metric; 0 for analytical models
+    double delta   = 0.0;   // dV/dS
+    double gamma   = 0.0;   // d²V/dS²
+    double vega    = 0.0;   // dV/dσ
+    double theta   = 0.0;   // dV/dt per calendar day (negative = time decay)
+    double rho     = 0.0;   // dV/dr
+    std::string modelName;  // for benchmarking output and logging
 };
 ```
-An aggregate result type with default member initialisers. Three design points:
+An aggregate result type with default member initialisers. Design points:
 
 1. **Default member initialisers (`= 0.0`)**: Introduced in C++11. They ensure that a
    default-constructed `PricingResult` has deterministic values, not garbage. Without
@@ -242,13 +264,20 @@ An aggregate result type with default member initialisers. Three design points:
    memory). The alternative is a user-defined default constructor, but default member
    initialisers achieve the same outcome more concisely.
 
-2. **`stderr` field name**: `stderr` is a macro defined in `<cstdio>` that expands to the
-   standard error file stream. If `<cstdio>` is included (directly or transitively) in
-   any translation unit that uses `PricingResult`, this name will conflict. A safer name
-   would be `stdErr`, `standardError`, or `mcStdErr`. This is a known naming hazard — in
-   Iteration 2 it should be renamed.
+2. **`stdErr` (renamed from `stderr`)**: The original name `stderr` is a macro defined in
+   `<cstdio>` that expands to the standard error file stream. If `<cstdio>` is included
+   (directly or transitively) in any translation unit that uses `PricingResult`, the name
+   would conflict and the struct field would silently become a file pointer. Renamed to
+   `stdErr` in Iteration 2 when the conflict was encountered compiling `server.cpp`.
 
-3. **`std::string modelName`**: Carrying the model name in the result enables the
+3. **Greeks fields (gamma, vega, theta, rho)**: Added alongside `delta` in the Greeks
+   iteration. All five Greeks use the same pattern — they are set by `BlackScholesModel`
+   and left as 0.0 by `MonteCarloModel` (which does not compute analytical Greeks). The
+   choice of 0.0 as the default rather than `NaN` was deliberate: NaN would propagate
+   silently into any downstream arithmetic, making bugs harder to detect. 0.0 is wrong
+   but obvious.
+
+4. **`std::string modelName`**: Carrying the model name in the result enables the
    benchmarking output to be self-describing without the caller needing to track which
    model produced which result. The cost is that `std::string` involves a heap allocation
    for strings longer than SSO (Small String Optimisation) capacity, typically 15–22
@@ -658,6 +687,73 @@ distribution. The code calls `N(-d1)` directly rather than `1.0 - N(d1)` because
 `erfc`-based implementation handles negative arguments accurately without cancellation
 error.
 
+```cpp
+static constexpr double kInvSqrt2Pi = 0.3989422804014327;
+const double nd1 = kInvSqrt2Pi * std::exp(-0.5 * d1 * d1);
+
+result.gamma = nd1 / (S * sigma * sqrtT);
+result.vega  = S * nd1 * sqrtT;
+
+const double thetaBase = -S * nd1 * sigma / (2.0 * sqrtT);
+switch (option.type()) {
+    case OptionType::Call:
+        result.theta = (thetaBase - r * discountedStrike * N(d2))  / 365.0;
+        result.rho   =  K * T * discountedStrike * N(d2);
+        break;
+    case OptionType::Put:
+        result.theta = (thetaBase + r * discountedStrike * N(-d2)) / 365.0;
+        result.rho   = -K * T * discountedStrike * N(-d2);
+        break;
+}
+```
+The five Greeks following price and delta:
+
+**N'(d1) — the standard normal PDF at d1:**
+`nd1 = (1/√(2π)) · exp(−d1²/2)` appears in every second-order Greek. It is computed once
+and reused. `kInvSqrt2Pi = 1/√(2π) ≈ 0.3989…` is a `static constexpr` so it is
+computed at compile time and placed in read-only memory — no runtime cost.
+
+**Gamma (d²V/dS²):**
+`Γ = N'(d1) / (S · σ · √T)` — identical for calls and puts. Gamma is the rate of change
+of delta with respect to spot. It is highest at-the-money, near expiry, where a small
+spot move causes a large delta change. Gamma is always positive for long options.
+
+**Vega (dV/dσ):**
+`ν = S · N'(d1) · √T` — identical for calls and puts. Vega is the sensitivity to a
+1-unit change in volatility (e.g. vol going from 20% to 21% changes the price by ~ν·0.01).
+Vega increases with time to expiry (more uncertainty) and is maximised ATM.
+
+**Theta (dV/dt, per calendar day):**
+```
+thetaBase = −S · N'(d1) · σ / (2√T)
+call:  Θ = (thetaBase − r · Ke^(−rT) · N(d2))  / 365
+put:   Θ = (thetaBase + r · Ke^(−rT) · N(−d2)) / 365
+```
+`thetaBase` is the volatility component of time decay (common to both). The second term
+is the interest rate component: for calls, the holder forgoes the risk-free rate on the
+discounted strike — a negative contribution (more decay). For puts, the holder benefits
+from interest on the strike, reducing the magnitude of theta.
+
+Division by 365 converts the per-year formula to per-calendar-day. Some practitioners
+use 252 (trading days); 365 is the standard for listed equity options. Theta is almost
+always negative (long options lose value as time passes). A deep ITM short put can have
+slightly positive theta.
+
+**Rho (dV/dr):**
+```
+call:  ρ =  K · T · Ke^(−rT) · N(d2)
+put:   ρ = −K · T · Ke^(−rT) · N(−d2)
+```
+Rho is positive for calls (higher rates → higher forward, call worth more) and negative
+for puts. It is scaled by `K · T · e^(−rT)` — larger for longer-dated, higher-strike
+options, small for short-dated or low-rate environments. For FX or index options with a
+dividend or foreign rate, the formula would include a second rho term.
+
+**Why compute Greeks alongside price:**
+Avoiding two separate BS evaluations when both price and Greeks are needed (the server
+always returns all six). Computing them together also avoids re-deriving d1, d2, sqrtT,
+and discountedStrike a second time.
+
 ---
 
 ## MonteCarloModel.h
@@ -670,9 +766,29 @@ error.
 required for `std::vector<double>` used in `generatePath`'s return type.
 
 ```cpp
+enum class VarianceReduction {
+    None,       // plain Monte Carlo, one path per random draw
+    Antithetic  // antithetic variates: each draw Z generates paths for +Z and −Z
+};
+```
+An `enum class` (scoped, strongly typed) rather than a plain `enum` or a boolean
+`useAntithetic` flag. The design rationale:
+
+- **`enum class` over plain `enum`**: scoped enumerators (`VarianceReduction::None`)
+  avoid polluting the enclosing namespace and prevent implicit integer conversion.
+- **`enum class` over `bool`**: a `bool useAntithetic` parameter would make the call
+  site `MonteCarloModel(100000, 1, 42, true)` — opaque. An enum makes it
+  `MonteCarloModel(100000, 1, 42, VarianceReduction::Antithetic)` — self-documenting.
+- **Extensibility**: the comment explicitly signals that control variates, importance
+  sampling, and stratified sampling are future values. Adding a new enumerator does not
+  change the class interface, any existing call site, or the switch/if-else structure
+  in `price()` beyond adding a new branch.
+
+```cpp
 explicit MonteCarloModel(int numPaths = 100'000,
                          int numSteps = 1,
-                         unsigned seed = 42);
+                         unsigned seed = 42,
+                         VarianceReduction varReduction = VarianceReduction::None);
 ```
 `explicit` prevents implicit conversion: `MonteCarloModel mc = 100000;` is a compile
 error. Without `explicit`, a function taking `MonteCarloModel` by value could silently
@@ -844,12 +960,61 @@ catastrophic cancellation when variance is small relative to the mean — e.g. d
 in-the-money options.
 
 ```cpp
-result.stderr    = discount * std::sqrt(variance / numPaths_);
+result.stdErr    = discount * std::sqrt(variance / static_cast<double>(numPaths_));
 ```
 Standard error of the mean = stddev / sqrt(N) = sqrt(variance / N). This is the MC
-convergence metric: at 95% confidence, the true price lies within ±1.96 * stderr of
+convergence metric: at 95% confidence, the true price lies within ±1.96 * stdErr of
 the estimated price. Multiplied by `discount` because the payoffs are undiscounted
 raw payoffs; the final result is the discounted expected payoff.
+
+```cpp
+if (varReduction_ == VarianceReduction::Antithetic) {
+    const int numPairs = numPaths_ / 2;
+    std::vector<double> samples(static_cast<size_t>(numPairs));
+    const double volSqrtDt = sigma * std::sqrt(dt);
+
+    for (int i = 0; i < numPairs; ++i) {
+        double Spos = S, Sneg = S;
+        for (int step = 0; step < numSteps_; ++step) {
+            const double Z   = dist_(rng_);
+            const double fwd = drift * dt + volSqrtDt * Z;
+            Spos *= std::exp(fwd);
+            Sneg *= std::exp(drift * dt - volSqrtDt * Z);
+        }
+        samples[i] = 0.5 * (option.payoff(Spos) + option.payoff(Sneg));
+    }
+    // variance over numPairs pair-samples, then stdErr = sqrt(variance/numPairs)
+    result.stdErr = discount * std::sqrt(variance / static_cast<double>(numPairs));
+}
+```
+**Antithetic variates — how and why:**
+
+For each draw `Z ~ N(0,1)` two paths are simulated simultaneously: one using `+Z` and
+one using `−Z`. For the standard GBM step `S *= exp(drift*dt + σ√dt·Z)`, negating Z
+gives a path that drifts in the opposite direction from the same starting point. The
+pair-average sample `y_i = (payoff(S_T(+Z)) + payoff(S_T(−Z))) / 2` has lower variance
+than a single-path sample because the two payoffs are negatively correlated.
+
+**Why negative correlation reduces variance:**
+```
+Var(y_i) = Var((f(+Z) + f(−Z)) / 2)
+         = (Var(f(+Z)) + Var(f(−Z)) + 2·Cov(f(+Z), f(−Z))) / 4
+```
+For monotone payoffs (calls and puts), `f(+Z)` and `f(−Z)` move in opposite directions,
+so `Cov < 0`. The variance of the pair-average is strictly less than the variance of a
+single-path sample, meaning we get a tighter confidence interval for the same number of
+random draws.
+
+**Effective path count:** `numPaths_` is treated as the total effective path count.
+`numPairs = numPaths_ / 2` pairs are simulated; each pair consumes one RNG draw but
+counts as two paths for the x-axis comparison. If `numPaths_` is odd, the last path is
+silently dropped (integer truncation). This is documented in the header.
+
+**stdErr denominator:** The standard error is computed over `numPairs` samples (each a
+pair-average), not `numPaths_`. This is correct: the pair-average is the elementary
+random variable; N/2 of them estimate the mean. Using `numPaths_` in the denominator
+would understate the stdErr by a factor of √2 and make the convergence appear better
+than it is.
 
 ---
 
@@ -1171,6 +1336,385 @@ Each of the four canvases (Call Price, Put Price, Call P&L, Put P&L) is drawn by
 - P&L heatmaps: deep red → white (at PnL=0) → deep green. The white midpoint is the
   breakeven line; red/green carry their natural financial meaning (loss/profit) which is
   unambiguous in this context.
+
+**Antithetic toggle (`.vr-toggle`):**
+A simple checkbox that sets `useAntithetic` in the JSON body. When enabled, the
+convergence chart title updates to "MC Convergence (antithetic)" and the convergence
+series uses `2*total` on the x-axis so both plain and antithetic MC are compared at the
+same total computational cost (number of random draws), not the same number of model
+evaluations.
+
+**IV panel (`.iv-section`):**
+Inputs: market price of the option. Output: solved IV as a percentage, delta between
+solved IV and the current σ input, and the convergence method ("Newton-Raphson" or
+"bisection"). The `computeIV()` async function calls the `/iv` endpoint separately from
+`runAll()` — IV solving is on-demand, not automatic, because it requires a market price
+input that the user provides manually.
+
+**MC estimator box (`.mc-estimator-box`):**
+A small formula display: `V̂ = e^{−rT} · (1/N) Σ payoff(S_Tⁱ)`. Added for reviewers
+who may not immediately recognise what the convergence chart is plotting. It documents
+the discount factor, the path average, and the GBM terminal value without requiring the
+reader to look at the C++ source.
+
+---
+
+## ImpliedVol.h
+
+```cpp
+struct IVResult {
+    double      impliedVol = 0.0;
+    bool        converged  = false;
+    std::string message;
+};
+```
+A result struct rather than throwing an exception on failure. The design choice:
+
+- **`converged` flag**: callers check `result.converged` before trusting `impliedVol`.
+  This is the same pattern as `std::from_chars` (C++17) — return a status alongside
+  the value rather than either throwing or returning a sentinel like `NaN`. It makes
+  the failure path explicit and forces the caller to handle it.
+- **`message` field**: carries a human-readable reason for failure ("Price below
+  intrinsic value", "max iterations reached"). This is the diagnostic surface — it goes
+  directly into the server's JSON error response and into the GUI's error display,
+  without any additional error classification logic.
+- **Not using `std::optional<double>`**: `optional` would signal "no value" but not
+  *why*. The three-field struct carries both the value and the status information.
+
+```cpp
+IVResult solveIV(double marketPrice, OptionType type,
+                 double S, double K, double r, double T);
+```
+A free function, not a method on a class. The IV solver does not maintain state between
+calls — it is a pure mathematical function of its inputs. A class would add nothing
+except constructor syntax. The function lives in the `options` namespace (not `options::v2`)
+because it works with V1 primitives (`BlackScholesModel`, `EuropeanOption`) and is used
+by the server which predates the V2 template redesign.
+
+---
+
+## ImpliedVol.cpp
+
+```cpp
+static constexpr int    kMaxNRIter  = 50;
+static constexpr int    kMaxBisIter = 100;
+static constexpr double kTol        = 1e-8;
+static constexpr double kMinVega    = 1e-10;
+static constexpr double kSigmaLo   = 1e-6;
+static constexpr double kSigmaHi   = 10.0;
+```
+`static constexpr` in the anonymous namespace of a `.cpp` file: the `static` prevents
+the symbols from being exported (internal linkage); `constexpr` makes them compile-time
+constants with no runtime storage. Each constant captures an explicit design decision:
+
+- `kTol = 1e-8`: price convergence in dollars. For a $10 option, this is 0.000001%
+  error — well inside any practical need. A tighter tolerance (e.g. 1e-12) would hit
+  floating-point noise from the BS formula before converging.
+- `kMinVega = 1e-10`: vega below this means the price is nearly insensitive to vol.
+  Taking a Newton-Raphson step `σ -= diff/vega` with near-zero vega produces a wildly
+  large step that exits the bracket. Switching to bisection is safer.
+- `kSigmaLo = 1e-6` / `kSigmaHi = 10.0`: the solver's vol bracket. 1e-6 (~0.0001%)
+  is effectively zero vol; 10.0 (1000%) covers any realistic market scenario. No
+  option in normal markets should require vol outside this range.
+
+```cpp
+struct BSEval { double price; double vega; };
+
+static BSEval evalBS(double sigma, OptionType type,
+                     double S, double K, double r, double T) {
+    BlackScholesModel bs;
+    EuropeanOption opt(K, T, type);
+    MarketData mkt{ S, r, sigma };
+    const auto res = bs.price(opt, mkt);
+    return { res.price, res.vega };
+}
+```
+A local helper that bundles a full BS evaluation (price + vega) into a single call.
+Why price and vega together: Newton-Raphson requires both at the same σ point, so it
+makes sense to compute them in a single BS pass rather than two separate calls. The
+helper is `static` (internal linkage — not visible outside this translation unit),
+avoiding any risk of name collision.
+
+**No-arbitrage bounds check:**
+```cpp
+const double intrinsic  = max(S - K·e^(−rT), 0)   // call
+                        = max(K·e^(−rT) - S, 0)   // put
+const double upperBound = S                         // call
+                        = K·e^(−rT)                // put
+```
+The lower bound is the discounted intrinsic value (not just `max(S-K, 0)` because the
+call is worth at least the forward intrinsic, accounting for time value of money on the
+strike). The upper bound for a call is the spot itself — a call can never be worth more
+than the underlying because the underlying dominates every payoff. For a put the upper
+bound is `K·e^(−rT)` — the present value of the maximum payout if spot goes to zero.
+If the market price violates either bound, no vol exists that could produce it under BS.
+
+**Brenner-Subrahmanyam initial guess:**
+```cpp
+sigma ≈ (P / S) · √(2π / T)
+```
+Derived by solving the ATM approximation `C_ATM ≈ S · σ · √(T/2π)` for σ. It is exact
+at-the-money and provides a reasonable starting point elsewhere, typically within a few
+volatility points of the true IV. A good initial guess means NR converges in 3–5
+iterations rather than 10–20.
+
+**Newton-Raphson loop:**
+```
+σ_{n+1} = σ_n − (BS(σ_n) − marketPrice) / vega(σ_n)
+```
+NR has quadratic convergence near the root: the number of correct decimal places roughly
+doubles each iteration. Safeguards:
+1. `abs(diff) < kTol` → converged, return immediately.
+2. `vega < kMinVega` → break, fall through to bisection.
+3. New σ outside `[kSigmaLo, kSigmaHi]` → break (NR overshot; bisection has the bracket).
+
+**Bisection fallback:**
+Linear convergence — the bracket width halves each iteration. With 100 iterations and
+initial bracket `[1e-6, 10.0]`, the final bracket width is `10.0 / 2^100 ≈ 8e-30`,
+which is far below `kTol`. In practice convergence is declared much earlier via the
+`abs(fMid) < kTol` check. Bisection requires a valid bracket where `f(lo) < 0 < f(hi)`;
+if none exists (e.g. the market price is achievable at a vol outside [lo,hi]), the
+function returns `converged=false` with a diagnostic message.
+
+---
+
+## v2/Concepts.h
+
+This file is the core of Iteration 2. It replaces the `Option` abstract base class as
+the mechanism for expressing what a model needs from an option type.
+
+```cpp
+#include <concepts>
+```
+`<concepts>` provides `std::convertible_to`, `std::same_as`, and the `requires`
+expression syntax. It is a C++20 header — the reason the project requires C++20.
+
+```cpp
+template<typename T>
+concept Priceable = requires(const T& opt, double spot) {
+    { opt.strike()     } -> std::convertible_to<double>;
+    { opt.expiry()     } -> std::convertible_to<double>;
+    { opt.type()       } -> std::same_as<OptionType>;
+    { opt.payoff(spot) } -> std::convertible_to<double>;
+};
+```
+**Reading a concept definition:**
+`requires(const T& opt, double spot) { ... }` is a *requires expression*. It introduces
+hypothetical variable names (`opt`, `spot`) and then lists *requirements* — expressions
+that must be well-formed for the concept to be satisfied. Each requirement has the form
+`{ expression } -> constraint;`:
+
+- `{ opt.strike() } -> std::convertible_to<double>` — the expression `opt.strike()`
+  must compile, and its return type must be implicitly convertible to `double`. A type
+  returning `float` satisfies this; one with no `strike()` method does not.
+- `{ opt.type() } -> std::same_as<OptionType>` — stricter: the return type must be
+  exactly `OptionType`, not merely convertible. This prevents accidentally satisfying
+  the concept with a type whose `type()` returns `int`.
+
+**V1 comparison:**
+In V1, `BlackScholesModel::price(const Option& option, ...)` takes the abstract base.
+If you pass an `AmericanOption*` through a `const Option&`, it compiles and links; the
+error only surfaces at runtime when `dynamic_cast` throws. In V2,
+`BlackScholesModel::price<EuropeanPriceable Opt>(...)` will not compile at all if `Opt`
+does not satisfy the concept — the error message names the unsatisfied requirement.
+
+```cpp
+template<typename T>
+concept EuropeanPriceable = Priceable<T>;
+```
+Currently a synonym for `Priceable`. The purpose is *documented intent*, not current
+enforcement. When `AmericanOption` is added, it should include an `earlyExercise()`
+method or some other distinguishing feature. `EuropeanPriceable` can then be refined
+with a negative constraint (e.g. `requires(!has_early_exercise<T>)`) to reject American
+options at the `BlackScholesModel` call site. Keeping the two concepts separate now
+means that future refinement requires changing only the concept definition, not all
+call sites.
+
+---
+
+## v2/BlackScholesV2.h
+
+```cpp
+template<EuropeanPriceable Opt>
+PricingResult price(const Opt& option, const MarketData& market) const {
+```
+A constrained function template. `EuropeanPriceable Opt` is the C++20 shorthand for
+`template<typename Opt> requires EuropeanPriceable<Opt>`. The compiler checks the
+constraint at the call site — if `Opt` does not satisfy `EuropeanPriceable`, the error
+appears at the `bs.price(opt, mkt)` line, not deep inside the function body.
+
+**Why the implementation is header-only:**
+Function templates must be visible (definition, not just declaration) at the point of
+instantiation. When `main.cpp` writes `bsV2.price(option, market)`, the compiler needs
+to generate code for `price<EuropeanOption>`. If the template were defined in a `.cpp`
+file, the compiler would only see the declaration and produce a link error ("undefined
+reference to `price<EuropeanOption>`"). The solution used everywhere in C++ is to put
+template definitions in headers. This is not a stylistic choice — it is a fundamental
+constraint of the language.
+
+**Elimination of `dynamic_cast`:**
+V1 `BlackScholesModel::price()` contains:
+```cpp
+const auto* european = dynamic_cast<const EuropeanOption*>(&option);
+if (!european) throw std::invalid_argument("...");
+```
+This check occurs at runtime, every call. In V2 it is absent — the concept constraint
+is checked at compile time and there is no code path that can reach a wrong-type
+scenario. The `dynamic_cast` overhead (~5–10 ns for a directly-derived type, much more
+through deep hierarchies) is gone.
+
+**Formula identity:**
+The BS formula (d1, d2, discountedStrike, N(d1), put-call logic, all Greeks) is
+identical to V1. Any benchmark difference between V1 and V2 is attributable purely to:
+1. Elimination of `dynamic_cast` (~5–10 ns per call)
+2. Elimination of vtable dispatch on `price()` when called through a `PricingModel*`
+   pointer (not present in the benchmark, which calls on a concrete object directly)
+
+The measured difference on concrete objects is ~1 ns (V1: ~279 ns, V2: ~278 ns) —
+consistent with the compiler already devirtualising the `price()` call when the static
+type is known. The architectural improvement (compile-time safety) is the real gain.
+
+---
+
+## v2/MonteCarloV2.h
+
+```cpp
+template<Priceable Opt>
+PricingResult price(const Opt& option, const MarketData& market) const {
+    ...
+    for (int i = 0; i < numPaths_; ++i) {
+        double spot = S;
+        for (int step = 0; step < numSteps_; ++step) {
+            spot *= std::exp(drift * dt + volSqrtDt * dist_(rng_));
+        }
+        payoffs[i] = option.payoff(spot);
+    }
+```
+Two simultaneous improvements over V1:
+
+**1. No per-path vector allocation:**
+V1 called `generatePath()` which allocated `std::vector<double>(numSteps_)` on every
+path. With 100k paths this is 100k heap allocations per `price()` call at ~30–40 ns
+each, totalling ~3–4 ms of pure allocation overhead. In V2, the path is accumulated in
+a scalar `double spot`. No heap allocation occurs per path. The scalar is directly
+incremented in the inner loop. This eliminates the dominant per-path cost measured in
+baseline_results.md.
+
+Why is this possible? In V1, `generatePath()` returned the entire path as a vector
+because the `payoff()` call was decoupled from path generation — the caller would take
+`path.back()` after the function returned. In V2, `payoff(spot)` is a direct inlineable
+call on the concrete type, so the compiler can see that only the terminal value is needed
+and the path need not be materialised.
+
+**2. No virtual dispatch on `payoff()`:**
+V1: `option.payoff(terminalSpot)` goes through a vtable pointer — the concrete
+`EuropeanOption::payoff` is looked up at runtime.
+V2: `option.payoff(spot)` on a `Priceable Opt` is a direct call to the concrete type's
+method, known at compile time. The compiler can inline it into the inner loop. For
+`EuropeanOption` this is `max(spot - K, 0.0)` — two arithmetic operations. Inlined,
+there is no function call overhead and no branch misprediction on the vtable lookup.
+
+**Measured impact (100k paths):**
+- V1: ~200–320 ns/path
+- V2: ~117–124 ns/path
+- Saving: ~80–100 ns/path
+
+The saving decomposes as:
+- ~30–40 ns: vector allocation eliminated
+- ~3–5 ns: virtual dispatch eliminated
+- Remainder: compiler register allocation and loop structure improvements from knowing
+  the payoff at compile time
+
+**Remaining known issue — mutable RNG state:**
+V2 still carries `mutable std::mt19937 rng_` and `mutable std::normal_distribution<double>
+dist_`. Two concurrent calls to `price()` on the same `MonteCarloV2` instance race on
+these members — a data race and undefined behaviour. Addressed in V3 by removing all
+mutable state: each worker thread gets its own independently-seeded RNG.
+
+---
+
+## v3/MonteCarloV3.h
+
+V3 adds multi-threading to V2's template-based, allocation-free inner loop. The design
+is centred on two problems: RNG safety and variance merging.
+
+**Thread partitioning:**
+```cpp
+const int totalUnits   = (varReduction_ == VarianceReduction::Antithetic)
+                         ? numPaths_ / 2   // units = pairs
+                         : numPaths_;      // units = paths
+const int unitsPerThread = totalUnits / numThreads_;
+const int remainder      = totalUnits % numThreads_;
+```
+Work is divided into `totalUnits` independent units (either individual paths or antithetic
+pairs). The remainder is distributed one extra unit per thread to the first `remainder`
+threads, so load is balanced to within one unit. Each thread processes a contiguous slice.
+
+For antithetic mode, the partition is over *pairs*, not individual paths. This ensures
+each thread maintains independent (Z, −Z) pairs without inter-thread coordination. The
+x-axis in convergence charts uses `2 * totalUnits` (effective paths) for fair comparison.
+
+**Per-thread RNG seeding:**
+```cpp
+const unsigned thisSeed = seed_ ^ (static_cast<unsigned>(t + 1) * 2654435761u);
+```
+`2654435761` is Knuth's multiplicative hash constant (the golden ratio scaled to 32
+bits). Multiplying the thread index by it and XOR-ing with the base seed spreads nearby
+indices far apart in the 32-bit seed space. If instead you used `seed + t`, adjacent
+seeds initialise the Mersenne Twister to similar states, potentially producing correlated
+random streams that inflate variance in the combined estimate.
+
+The `t + 1` (not `t`) prevents the thread-0 seed from being identical to the base seed
+(`seed ^ 0 = seed`), which would make V3 with one thread produce the exact same sequence
+as V2 seeded with `seed`. The base seed is still reproducible: the same constructor
+arguments always produce the same per-thread seeds and therefore the same result.
+
+**V3 is genuinely const and thread-safe:**
+Unlike V1 and V2, V3 has no `mutable` members. Each call to `price()` creates all thread
+state locally. `price()` can be called concurrently on the same V3 instance from multiple
+threads without any synchronisation — there is nothing shared to race on.
+
+**Chan's parallel variance formula:**
+Each thread `t` accumulates `(sum_t, sumSq_t, count_t)`. Merging:
+
+Step 1 — combined mean:
+```
+μ = Σ(sum_t) / Σ(count_t)
+```
+
+Step 2 — combined sum of squared deviations:
+```
+ssq_t = sumSq_t − count_t · μ_t²          (thread-local SSQ)
+ssq   = Σ(ssq_t + count_t · (μ_t − μ)²)   (Chan's correction term)
+variance = ssq / (N − 1)                   (Bessel's correction)
+```
+
+Why not just concatenate all payoffs and compute variance? That would require each
+thread to return a vector of payoff values — O(numPaths) memory per call. Chan's formula
+computes the exact same variance from O(1) state per thread. The intermediate value
+`sumSq_t − count_t · μ_t²` is the thread-local sum of squared deviations computed from
+its own mean, not the global mean. The `count_t · (μ_t − μ)²` term corrects for the
+difference between the thread-local and global means. This is numerically stable: it
+avoids the catastrophic cancellation of the naive `E[X²] − E[X]²` formula on large sums.
+
+**Crossover point:**
+Thread creation (`std::thread` constructor + join) costs approximately 1–2 ms on
+Windows/MinGW. For small path counts this dominates computation: at 10k paths, V3 is
+0.67× V2 (slower). The crossover to net speedup is around 50k paths. Above 100k paths,
+V3 approaches near-linear scaling with thread count. This crossover is intentionally
+documented and visible in the benchmark — it demonstrates understanding of parallelism
+costs, not just the benefits.
+
+**`numThreads = 0` default → `hardware_concurrency()`:**
+```cpp
+numThreads_(numThreads > 0
+            ? numThreads
+            : static_cast<int>(std::max(1u, std::thread::hardware_concurrency())))
+```
+`std::thread::hardware_concurrency()` returns the number of logical cores, or 0 if the
+platform cannot determine it. The `std::max(1u, ...)` fallback ensures at least one
+thread on exotic platforms. Passing an explicit thread count is useful for benchmarking
+(to measure at 1, 2, 4, 8, 12 threads) without changing the default for normal use.
 
 ---
 
