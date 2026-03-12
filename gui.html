@@ -240,6 +240,41 @@
     font-size: 13px; color: var(--warn); line-height: 1.5;
   }
 
+  /* ── Implied Volatility section ── */
+  .iv-section {
+    margin-top: 24px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 20px;
+  }
+  .iv-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .iv-controls {
+    display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;
+    padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 16px;
+  }
+  .iv-input-group { display: flex; flex-direction: column; gap: 5px; }
+  .iv-input-group label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .iv-input {
+    width: 120px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 14px; font-family: monospace;
+    padding: 7px 10px; outline: none; -moz-appearance: textfield;
+    transition: border-color 0.15s;
+  }
+  .iv-input::-webkit-outer-spin-button,
+  .iv-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+  .iv-input:focus { border-color: rgba(88,166,255,0.5); background: rgba(88,166,255,0.05); }
+  .iv-btn {
+    padding: 9px 22px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-dim); font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: border-color 0.15s, color 0.15s; white-space: nowrap;
+    align-self: flex-end;
+  }
+  .iv-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .iv-btn:disabled { opacity: 0.45; cursor: default; }
+  .iv-result { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
+  .iv-value { font-size: 38px; font-weight: 700; font-family: monospace; color: var(--accent); }
+  .iv-meta { font-size: 12px; color: var(--muted); font-family: monospace; }
+  .iv-error { font-size: 13px; color: var(--warn); font-family: monospace; }
+  .iv-method { font-size: 11px; color: var(--muted); margin-top: 4px; font-style: italic; }
+
   /* ── Heatmap section ── */
   .heatmap-section {
     margin-top: 24px; background: var(--surface);
@@ -470,6 +505,36 @@
             <div class="metric-value metric-small" id="bs-d2">-</div>
           </div>
         </div>
+        <div class="metric-row">
+          <div class="metric-small">
+            <div class="metric-label">
+              Gamma
+              <span class="info" data-tip="<b>Gamma (Γ)</b><br>The rate of change of Delta as the stock price moves. How much delta shifts when the stock moves £1.<br><br>A gamma of 0.03 means: stock goes up £1 → delta increases by 0.03. High gamma = delta changes fast. Gamma is highest for at-the-money options near expiry.">i</span>
+            </div>
+            <div class="metric-value metric-small" id="bs-gamma">-</div>
+          </div>
+          <div class="metric-small">
+            <div class="metric-label">
+              Vega
+              <span class="info" data-tip="<b>Vega (ν)</b><br>How much the option's price changes when implied volatility moves by 1 percentage point (1%).<br><br>A vega of 0.38 means: volatility rises 1% → option gains £0.38. Vega is always positive — higher vol always makes options more valuable because it widens the range of possible outcomes.">i</span>
+            </div>
+            <div class="metric-value metric-small" id="bs-vega">-</div>
+          </div>
+          <div class="metric-small">
+            <div class="metric-label">
+              Theta
+              <span class="info" data-tip="<b>Theta (Θ)</b><br>The option's time decay — how much value it loses per calendar day, all else equal.<br><br>A theta of −0.03 means: one day passes → option loses £0.03. This is negative for long options (you own an asset that decays). Decay accelerates as expiry approaches.">i</span>
+            </div>
+            <div class="metric-value metric-small" id="bs-theta">-</div>
+          </div>
+          <div class="metric-small">
+            <div class="metric-label">
+              Rho
+              <span class="info" data-tip="<b>Rho (ρ)</b><br>How much the option's price changes when the risk-free interest rate moves by 1 percentage point (1%).<br><br>A rho of 0.45 means: rates rise 1% → option gains £0.45. Calls benefit from higher rates (holding the option instead of the stock earns more interest); puts are hurt.">i</span>
+            </div>
+            <div class="metric-value metric-small" id="bs-rho">-</div>
+          </div>
+        </div>
       </div>
 
       <!-- MC result card -->
@@ -549,6 +614,29 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ── Implied Volatility section ── -->
+<div class="iv-section">
+  <div class="iv-header">
+    <div class="panel-title" style="margin-bottom:0">
+      Implied Volatility
+      <span class="info" data-tip="<b>Implied Volatility (IV)</b><br>The volatility that, when plugged into the Black-Scholes formula, produces the observed market price. It is the market's consensus expectation of future volatility embedded in the option price.<br><br>IV is computed using Newton-Raphson with bisection fallback. S, K, r and T are taken from the main panel — only the market price needs to be entered here.">i</span>
+    </div>
+  </div>
+  <div class="iv-controls">
+    <div class="iv-input-group">
+      <label>
+        Market price
+        <span class="info" data-tip="<b>Market Price</b><br>The price you observed in the market for this option. The solver finds the volatility σ such that BS(σ) exactly equals this price.<br><br>Must be above intrinsic value and below the theoretical upper bound (S for calls, K·e⁻ʳᵀ for puts).">i</span>
+      </label>
+      <input type="number" class="iv-input" id="iv-market-price" placeholder="e.g. 10.45" min="0" step="0.01">
+    </div>
+    <button class="iv-btn" id="iv-btn" onclick="computeIV()">Solve IV</button>
+  </div>
+  <div id="iv-output" style="min-height:52px">
+    <div class="iv-meta" style="color:var(--muted)">Enter a market price above and click Solve IV. S, K, r, T are taken from the main panel.</div>
   </div>
 </div>
 
@@ -854,6 +942,10 @@ async function runAll() {
   document.getElementById('bs-delta').textContent = bs.delta.toFixed(6);
   document.getElementById('bs-d1').textContent    = bs.d1.toFixed(4);
   document.getElementById('bs-d2').textContent    = bs.d2.toFixed(4);
+  document.getElementById('bs-gamma').textContent = bs.gamma.toFixed(6);
+  document.getElementById('bs-vega').textContent  = bs.vega.toFixed(6);
+  document.getElementById('bs-theta').textContent = bs.theta.toFixed(6);
+  document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
 
   const mc = res.mc;
   document.getElementById('mc-price').textContent  = mc.price.toFixed(6);
@@ -977,6 +1069,23 @@ function showExplain() {
     </div>
 
     <div class="explain-section">
+      <h3>Greeks</h3>
+      <p><b>Gamma (${bs.gamma.toFixed(4)})</b> — Delta itself changes at this rate per £1 move in the stock.
+      ${type==='call'?'A £1 rise':'A £1 fall'} in the stock price increases delta by <span class="hl-num">${bs.gamma.toFixed(4)}</span>.
+      Gamma is highest for at-the-money options close to expiry, where small moves can swing the delta dramatically.</p>
+      <p><b>Vega (${bs.vega.toFixed(4)})</b> — A 1 percentage-point rise in implied volatility adds
+      <span class="hl-num">£${(bs.vega/100).toFixed(4)}</span> to the option price.
+      Vega is always positive — greater uncertainty always makes options more valuable.</p>
+      <p><b>Theta (${bs.theta.toFixed(4)})</b> — Each calendar day that passes costs the holder
+      <span class="hl-num">£${Math.abs(bs.theta).toFixed(4)}</span> in time value, all else equal.
+      This decay accelerates as expiry approaches.</p>
+      <p><b>Rho (${bs.rho.toFixed(4)})</b> — A 1 percentage-point rise in the risk-free rate
+      ${bs.rho >= 0 ? 'adds' : 'removes'} <span class="hl-num">£${(Math.abs(bs.rho)/100).toFixed(4)}</span> to the option price.
+      ${type==='call'?'Calls benefit from higher rates (money earns more while you wait)':'Puts are hurt by higher rates (the discounted strike is worth less)'}.
+      </p>
+    </div>
+
+    <div class="explain-section">
       <h3>Monte Carlo Validation</h3>
       <p>Running <span class="hl-num">${niceN}</span> simulated futures gives a price of
       <span class="hl-num">£${mc.price.toFixed(4)}</span> with a standard error of <span class="hl-num">£${mc.stdErr.toFixed(4)}</span>.
@@ -1006,6 +1115,77 @@ document.getElementById('explain-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeExplain();
 });
 document.addEventListener('keydown', e => { if (e.key==='Escape') closeExplain(); });
+
+// ── Implied Volatility ────────────────────────────────────────────────────────
+async function computeIV() {
+  const marketPrice = parseFloat(document.getElementById('iv-market-price').value);
+  if (isNaN(marketPrice) || marketPrice <= 0) {
+    document.getElementById('iv-output').innerHTML =
+      '<div class="iv-error">Enter a positive market price.</div>';
+    return;
+  }
+
+  const btn = document.getElementById('iv-btn');
+  btn.disabled = true; btn.textContent = 'Solving…';
+
+  const S     = getVal('S');
+  const K     = getVal('K');
+  const r     = getVal('r') / 100;
+  const sigma = getVal('sigma') / 100;   // unused by solver but kept for context
+  const T     = getVal('T');
+
+  let data;
+  try {
+    const response = await fetch('http://localhost:18080/iv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ S, K, r, T, type: optionType, marketPrice })
+    });
+    data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+  } catch (e) {
+    document.getElementById('iv-output').innerHTML =
+      `<div class="iv-error">Server error: ${e.message}</div>`;
+    btn.disabled = false; btn.textContent = 'Solve IV';
+    return;
+  }
+
+  btn.disabled = false; btn.textContent = 'Solve IV';
+
+  if (!data.converged) {
+    document.getElementById('iv-output').innerHTML =
+      `<div class="iv-error">No solution: ${data.message}</div>`;
+    return;
+  }
+
+  const ivPct = (data.iv * 100).toFixed(4);
+  // Show how far the BS price (at current σ from main panel) is from the market price
+  const bsPrice = lastResults ? lastResults.bs.price.toFixed(4) : '—';
+  const diff = lastResults ? (marketPrice - lastResults.bs.price).toFixed(4) : '—';
+
+  document.getElementById('iv-output').innerHTML = `
+    <div class="iv-result">
+      <div>
+        <div class="metric-label" style="margin-bottom:4px">Implied Volatility</div>
+        <div class="iv-value">${ivPct}%</div>
+      </div>
+      <div>
+        <div class="metric-label" style="margin-bottom:4px">vs Current σ</div>
+        <div style="font-size:16px;font-family:monospace;color:var(--text-dim)">${(getVal('sigma')).toFixed(2)}%</div>
+      </div>
+      ${lastResults ? `
+      <div>
+        <div class="metric-label" style="margin-bottom:4px">BS price @ current σ</div>
+        <div style="font-size:16px;font-family:monospace;color:var(--text-dim)">${bsPrice}</div>
+      </div>
+      <div>
+        <div class="metric-label" style="margin-bottom:4px">Price diff (mkt − BS)</div>
+        <div style="font-size:16px;font-family:monospace;color:${parseFloat(diff)>=0?'var(--accent2)':'var(--warn)'}">${parseFloat(diff)>=0?'+':''}${diff}</div>
+      </div>` : ''}
+    </div>
+    <div class="iv-method">${data.message}</div>
+  `;
+}
 
 // ── Heatmap ───────────────────────────────────────────────────────────────────
 

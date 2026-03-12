@@ -24,6 +24,7 @@ add_library(options_engine
     src/options/EuropeanOption.cpp
     src/models/BlackScholesModel.cpp
     src/models/MonteCarloModel.cpp
+    src/utils/ImpliedVol.cpp
 )
 
 target_include_directories(options_engine PUBLIC include)

@@ -75,6 +75,30 @@ PricingResult BlackScholesModel::price(const Option& option,
             break;
     }
 
+    // ── Greeks ────────────────────────────────────────────────────────────────
+    // Normal PDF evaluated at d1: N'(d1) = (1/sqrt(2π)) * exp(-d1²/2)
+    static constexpr double kInvSqrt2Pi = 0.3989422804014327;
+    const double nd1 = kInvSqrt2Pi * std::exp(-0.5 * d1 * d1);
+
+    // Gamma: d²V/dS² — identical for calls and puts
+    result.gamma = nd1 / (S * sigma * sqrtT);
+
+    // Vega: dV/dσ — identical for calls and puts (returned in price-point terms)
+    result.vega = S * nd1 * sqrtT;
+
+    // Theta and Rho differ by option type
+    const double thetaBase = -S * nd1 * sigma / (2.0 * sqrtT);
+    switch (option.type()) {
+        case OptionType::Call:
+            result.theta = (thetaBase - r * discountedStrike * N(d2))  / 365.0;
+            result.rho   =  K * T * discountedStrike * N(d2);
+            break;
+        case OptionType::Put:
+            result.theta = (thetaBase + r * discountedStrike * N(-d2)) / 365.0;
+            result.rho   = -K * T * discountedStrike * N(-d2);
+            break;
+    }
+
     return result;
 }
 

@@ -12,6 +12,7 @@
 #include "models/MonteCarloModel.h"
 #include "utils/MarketData.h"
 #include "utils/PricingResult.h"
+#include "utils/ImpliedVol.h"
 
 #include <cmath>
 #include <vector>
@@ -195,6 +196,10 @@ int main() {
                 {"bs", {
                     {"price",  bsRes.price},
                     {"delta",  bsRes.delta},
+                    {"gamma",  bsRes.gamma},
+                    {"vega",   bsRes.vega},
+                    {"theta",  bsRes.theta},
+                    {"rho",    bsRes.rho},
                     {"stdErr", bsRes.stdErr},
                     {"d1",     d1},
                     {"d2",     d2}
@@ -202,6 +207,10 @@ int main() {
                 {"bsOther", {
                     {"price",  bsOther.price},
                     {"delta",  bsOther.delta},
+                    {"gamma",  bsOther.gamma},
+                    {"vega",   bsOther.vega},
+                    {"theta",  bsOther.theta},
+                    {"rho",    bsOther.rho},
                     {"stdErr", bsOther.stdErr},
                     {"d1",     d1},   // d1/d2 are symmetric for call/put
                     {"d2",     d2}
@@ -215,6 +224,43 @@ int main() {
             };
 
             res.set_content(response.dump(), "application/json");
+
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json({{"error", e.what()}}).dump(), "application/json");
+        }
+    });
+
+    // ── /iv: implied volatility from market price ──────────────────────────────
+    svr.Options("/iv", [](const httplib::Request&, httplib::Response& res) {
+        setCors(res);
+        res.status = 200;
+    });
+
+    svr.Post("/iv", [](const httplib::Request& req, httplib::Response& res) {
+        setCors(res);
+        res.set_header("Content-Type", "application/json");
+        try {
+            const auto body = json::parse(req.body);
+
+            const double S           = body.at("S").get<double>();
+            const double K           = body.at("K").get<double>();
+            const double r           = body.at("r").get<double>();
+            const double T           = body.at("T").get<double>();
+            const double marketPrice = body.at("marketPrice").get<double>();
+            const std::string typeStr = body.at("type").get<std::string>();
+
+            if (typeStr != "call" && typeStr != "put")
+                throw std::invalid_argument("type must be 'call' or 'put'");
+
+            const OptionType otype = (typeStr == "call") ? OptionType::Call : OptionType::Put;
+            const IVResult   ivRes = solveIV(marketPrice, otype, S, K, r, T);
+
+            res.set_content(json({
+                {"iv",        ivRes.impliedVol},
+                {"converged", ivRes.converged},
+                {"message",   ivRes.message}
+            }).dump(), "application/json");
 
         } catch (const std::exception& e) {
             res.status = 400;
