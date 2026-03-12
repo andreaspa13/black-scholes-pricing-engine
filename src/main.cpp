@@ -5,6 +5,10 @@
 #include "utils/Benchmark.h"
 #include "utils/ImpliedVol.h"
 
+// ── Iteration 2: template models ──────────────────────────────────────────────
+#include "v2/BlackScholesV2.h"
+#include "v2/MonteCarloV2.h"
+
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -281,6 +285,49 @@ void runTests() {
         }
     }
 
+    // ── TC23–TC26: Iteration 2 correctness ───────────────────────────────────
+    // V2 models must produce results identical to V1 to machine precision.
+    // Any numerical difference would indicate a formula regression, not a
+    // performance improvement.
+    {
+        MarketData m{ 100.0, 0.05, 0.20 };
+        EuropeanOption call(100.0, 1.0, OptionType::Call);
+        EuropeanOption put (100.0, 1.0, OptionType::Put);
+
+        // BS V1 reference values
+        const auto v1Call = bs.price(call, m);
+        const auto v1Put  = bs.price(put,  m);
+
+        v2::BlackScholesModel bsV2;
+
+        // TC23: V2 BS call matches V1 to machine precision
+        const auto v2Call = bsV2.price(call, m);
+        check("TC23 V2 BS call price == V1",  v2Call.price, v1Call.price, 1e-14);
+        check("TC23 V2 BS call delta == V1",  v2Call.delta, v1Call.delta, 1e-14);
+        check("TC23 V2 BS call gamma == V1",  v2Call.gamma, v1Call.gamma, 1e-14);
+        check("TC23 V2 BS call vega  == V1",  v2Call.vega,  v1Call.vega,  1e-14);
+        check("TC23 V2 BS call theta == V1",  v2Call.theta, v1Call.theta, 1e-14);
+        check("TC23 V2 BS call rho   == V1",  v2Call.rho,   v1Call.rho,   1e-14);
+
+        // TC24: V2 BS put matches V1 to machine precision
+        const auto v2Put = bsV2.price(put, m);
+        check("TC24 V2 BS put price  == V1",  v2Put.price,  v1Put.price,  1e-14);
+        check("TC24 V2 BS put delta  == V1",  v2Put.delta,  v1Put.delta,  1e-14);
+
+        // TC25: V2 MC call converges to BS (same 3-sigma test as TC12)
+        v2::MonteCarloModel mcV2(500'000, 1, 42);
+        const auto v2MC = mcV2.price(call, m);
+        checkMC("TC25 V2 MC(500k) call vs BS", v2MC.price, v1Call.price, v2MC.stdErr, 3.0);
+
+        // TC26: V2 MC stdErr is in the same ballpark as V1 (same seed, same paths)
+        // They differ slightly because V2 inlines path simulation instead of calling
+        // generatePath() — the RNG sequence is identical but the payoff call path
+        // differs. Require they agree to within 5 stdErrs of each other.
+        MonteCarloModel mcV1(500'000, 1, 42);
+        const auto v1MC = mcV1.price(call, m);
+        checkMC("TC26 V2 MC price within 5σ of V1 MC", v2MC.price, v1MC.price, v2MC.stdErr, 5.0);
+    }
+
     // ── Summary ───────────────────────────────────────────────────────────────
     std::cout << "\n"
               << g_results.passed << "/" << (g_results.passed + g_results.failed)
@@ -351,11 +398,81 @@ void runBenchmarks() {
     }
 }
 
+// ── Iteration 2 benchmarks ────────────────────────────────────────────────────
+// Direct comparison of V1 (virtual dispatch + dynamic_cast) vs V2 (templates).
+// Same option, same market data, same iteration counts — only the model changes.
+//
+// Expected improvements:
+//   BS:  ~5-10 ns/call  from eliminating dynamic_cast
+//   MC:  ~3-5 ns/path   from eliminating virtual payoff() dispatch
+//        ~30-40 ns/path  from eliminating per-path std::vector allocation
+//        Total MC speedup: roughly 2-3x on the inner loop
+
+void runV2Benchmarks() {
+    std::cout << "=== Iteration 2 vs Iteration 1 benchmarks ===\n\n";
+
+    MarketData market { .spot=100.0, .riskFreeRate=0.05, .volatility=0.20 };
+    EuropeanOption call(100.0, 1.0, OptionType::Call);
+
+    // ── Black-Scholes ─────────────────────────────────────────────────────────
+    {
+        BlackScholesModel    bsV1;
+        v2::BlackScholesModel bsV2;
+
+        auto r1 = Benchmark::run("BS V1 (10k iters)", [&]() {
+            auto result = bsV1.price(call, market);
+            (void)result.price;
+        }, 10'000);
+
+        auto r2 = Benchmark::run("BS V2 (10k iters)", [&]() {
+            auto result = bsV2.price(call, market);
+            (void)result.price;
+        }, 10'000);
+
+        Benchmark::print(r1);
+        Benchmark::print(r2);
+        std::cout << "  BS speedup (mean): "
+                  << std::fixed << std::setprecision(2)
+                  << (r1.meanNs / r2.meanNs) << "x\n\n";
+    }
+
+    // ── Monte Carlo ───────────────────────────────────────────────────────────
+    for (int paths : { 1'000, 10'000, 100'000 }) {
+        MonteCarloModel    mcV1(paths, 1, 42);
+        v2::MonteCarloModel mcV2(paths, 1, 42);
+
+        const std::string label = std::to_string(paths) + " paths (100 iters)";
+
+        auto r1 = Benchmark::run("MC V1 " + label, [&]() {
+            auto result = mcV1.price(call, market);
+            (void)result.price;
+        }, 100);
+
+        auto r2 = Benchmark::run("MC V2 " + label, [&]() {
+            auto result = mcV2.price(call, market);
+            (void)result.price;
+        }, 100);
+
+        Benchmark::print(r1);
+        std::cout << "  implied per-path : "
+                  << std::fixed << std::setprecision(1)
+                  << (r1.meanNs / paths) << " ns\n";
+        Benchmark::print(r2);
+        std::cout << "  implied per-path : "
+                  << std::fixed << std::setprecision(1)
+                  << (r2.meanNs / paths) << " ns\n";
+        std::cout << "  MC speedup (mean): "
+                  << std::fixed << std::setprecision(2)
+                  << (r1.meanNs / r2.meanNs) << "x\n\n";
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int main() {
     runTests();
     runSanityCheck();
     runBenchmarks();
+    runV2Benchmarks();
     return g_results.failed > 0 ? 1 : 0;
 }
