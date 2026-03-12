@@ -68,9 +68,9 @@ struct ConvPoint { int n; double price; double se; };
 
 std::vector<ConvPoint> buildConvergenceSeries(
         double S, double K, double r, double sigma, double T,
-        OptionType type, int maxN) {
+        OptionType type, int maxN, bool antithetic) {
 
-    // Build log-spaced checkpoint set (same logic as the JS version)
+    // Build log-spaced checkpoint set over [50, maxN] effective paths
     std::set<int> cpSet;
     const double logMin = std::log10(50.0);
     const double logMax = std::log10(static_cast<double>(maxN));
@@ -82,7 +82,6 @@ std::vector<ConvPoint> buildConvergenceSeries(
     std::vector<int> checkpoints(cpSet.begin(), cpSet.end());
     std::sort(checkpoints.begin(), checkpoints.end());
 
-    // Use a fixed seed for reproducibility across identical requests
     std::mt19937 rng(42);
     std::normal_distribution<double> dist(0.0, 1.0);
 
@@ -94,24 +93,57 @@ std::vector<ConvPoint> buildConvergenceSeries(
     int total = 0, cpIdx = 0;
     std::vector<ConvPoint> result;
 
-    for (int i = 1; i <= maxN; ++i) {
-        const double ST      = S * std::exp(drift * T + volSqT * dist(rng));
-        const double payoff  = (type == OptionType::Call)
-                               ? std::max(ST - K, 0.0)
-                               : std::max(K - ST, 0.0);
-        sum   += payoff;
-        sumSq += payoff * payoff;
-        ++total;
+    if (antithetic) {
+        /**
+         * Each iteration draws one Z, produces two terminal spots, and records
+         * the pair-average payoff as one sample. The x-axis value (effectivePaths)
+         * is 2*total so the convergence chart is directly comparable with plain MC
+         * at the same computational cost.
+         */
+        const int maxPairs = maxN / 2;
+        for (int i = 1; i <= maxPairs; ++i) {
+            const double Z       = dist(rng);
+            const double ST_pos  = S * std::exp(drift * T + volSqT * Z);
+            const double ST_neg  = S * std::exp(drift * T - volSqT * Z);
+            const double payoff  = 0.5 * (
+                ((type == OptionType::Call) ? std::max(ST_pos - K, 0.0) : std::max(K - ST_pos, 0.0))
+              + ((type == OptionType::Call) ? std::max(ST_neg - K, 0.0) : std::max(K - ST_neg, 0.0))
+            );
+            sum   += payoff;
+            sumSq += payoff * payoff;
+            ++total;
 
-        if (cpIdx < static_cast<int>(checkpoints.size()) && i >= checkpoints[cpIdx]) {
-            const double mean = sum / total;
-            // Bessel-corrected sample variance
-            const double var  = (sumSq / total - mean * mean)
-                                * static_cast<double>(total)
-                                / static_cast<double>(total - 1);
-            result.push_back({ total, disc * mean,
-                                disc * std::sqrt(std::max(var, 0.0) / total) });
-            ++cpIdx;
+            const int effectivePaths = 2 * total;
+            if (cpIdx < static_cast<int>(checkpoints.size())
+                    && effectivePaths >= checkpoints[cpIdx]) {
+                const double mean = sum / total;
+                const double var  = (sumSq / total - mean * mean)
+                                    * static_cast<double>(total)
+                                    / static_cast<double>(total - 1);
+                result.push_back({ effectivePaths, disc * mean,
+                                    disc * std::sqrt(std::max(var, 0.0) / total) });
+                ++cpIdx;
+            }
+        }
+    } else {
+        for (int i = 1; i <= maxN; ++i) {
+            const double ST     = S * std::exp(drift * T + volSqT * dist(rng));
+            const double payoff = (type == OptionType::Call)
+                                  ? std::max(ST - K, 0.0)
+                                  : std::max(K - ST, 0.0);
+            sum   += payoff;
+            sumSq += payoff * payoff;
+            ++total;
+
+            if (cpIdx < static_cast<int>(checkpoints.size()) && i >= checkpoints[cpIdx]) {
+                const double mean = sum / total;
+                const double var  = (sumSq / total - mean * mean)
+                                    * static_cast<double>(total)
+                                    / static_cast<double>(total - 1);
+                result.push_back({ total, disc * mean,
+                                    disc * std::sqrt(std::max(var, 0.0) / total) });
+                ++cpIdx;
+            }
         }
     }
     return result;
@@ -141,8 +173,9 @@ int main() {
             const double sigma = body.at("sigma").get<double>();
             const double T     = body.at("T").get<double>();
             const std::string typeStr = body.at("type").get<std::string>();
-            const int numPaths    = body.value("numPaths",    10000);
-            const int numVisPaths = body.value("numVisPaths", 50);
+            const int  numPaths     = body.value("numPaths",     10000);
+            const int  numVisPaths  = body.value("numVisPaths",  50);
+            const bool useAntithetic = body.value("useAntithetic", false);
 
             if (S <= 0 || K <= 0 || sigma <= 0 || T <= 0)
                 throw std::invalid_argument("S, K, sigma, T must all be positive");
@@ -173,11 +206,15 @@ int main() {
             // ── Price with Monte Carlo ─────────────────────────────────────
             // Fresh instance per-request: mutable RNG state is not thread-safe
             // across shared instances (documented design smell in MonteCarloModel.h).
-            MonteCarloModel mc(numPaths, 1, 42);
+            const VarianceReduction varRed = useAntithetic
+                                             ? VarianceReduction::Antithetic
+                                             : VarianceReduction::None;
+            MonteCarloModel mc(numPaths, 1, 42, varRed);
             const PricingResult mcRes = mc.price(opt, market);
 
             // ── Convergence series ─────────────────────────────────────────
-            const auto conv = buildConvergenceSeries(S, K, r, sigma, T, otype, numPaths);
+            const auto conv = buildConvergenceSeries(S, K, r, sigma, T, otype,
+                                                     numPaths, useAntithetic);
 
             // ── Visual GBM paths ───────────────────────────────────────────
             std::mt19937 visRng(99);  // different seed from MC so paths look varied
@@ -216,11 +253,13 @@ int main() {
                     {"d2",     d2}
                 }},
                 {"mc", {
-                    {"price",  mcRes.price},
-                    {"stdErr", mcRes.stdErr}
+                    {"price",       mcRes.price},
+                    {"stdErr",      mcRes.stdErr},
+                    {"modelName",   mcRes.modelName}
                 }},
-                {"convergence", convJson},
-                {"paths",       pathsJson}
+                {"convergence",  convJson},
+                {"paths",        pathsJson},
+                {"varReduction", useAntithetic ? "antithetic" : "none"}
             };
 
             res.set_content(response.dump(), "application/json");

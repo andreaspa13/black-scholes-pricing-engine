@@ -1,6 +1,6 @@
 #include "options/EuropeanOption.h"
 #include "models/BlackScholesModel.h"
-#include "models/MonteCarloModel.h"
+#include "models/MonteCarloModel.h"   // also brings in VarianceReduction enum
 #include "utils/MarketData.h"
 #include "utils/Benchmark.h"
 #include "utils/ImpliedVol.h"
@@ -205,60 +205,78 @@ void runTests() {
         check("TC14 MC rejects negative expiry", threw ? 1.0 : 0.0, 1.0, 0.5);
     }
 
-    // ── TC15–TC20: Implied Volatility round-trips ─────────────────────────────
+    // ── TC15–TC16: Antithetic variates ───────────────────────────────────────
+    // TC15: Antithetic MC call converges to BS (same 3-sigma check as TC12)
+    // TC16: Antithetic stdErr < plain MC stdErr for the same path count
+    {
+        MarketData m{ 100.0, 0.05, 0.20 };
+        EuropeanOption call(100.0, 1.0, OptionType::Call);
+        const double bsCall = bs.price(call, m).price;
+
+        MonteCarloModel mcAV(500'000, 1, 42, VarianceReduction::Antithetic);
+        const auto avRes = mcAV.price(call, m);
+        checkMC("TC15 MC+AV(500k) call vs BS", avRes.price, bsCall, avRes.stdErr, 3.0);
+
+        MonteCarloModel mcPlain(500'000, 1, 42);
+        const auto plainRes = mcPlain.price(call, m);
+        check("TC16 AV stdErr < plain MC stdErr",
+              avRes.stdErr < plainRes.stdErr ? 1.0 : 0.0, 1.0, 0.5);
+    }
+
+    // ── TC17–TC26: Implied Volatility round-trips ─────────────────────────────
     // Price with BS at known σ, then recover σ via IV solver — must match to 1e-6.
     {
         MarketData m{ 100.0, 0.05, 0.20 };
 
-        // TC15: ATM call round-trip
+        // TC17: ATM call round-trip
         {
             EuropeanOption call(100.0, 1.0, OptionType::Call);
             const double mktPrice = bs.price(call, m).price;
             const auto iv = solveIV(mktPrice, OptionType::Call, 100.0, 100.0, 0.05, 1.0);
-            check("TC15 IV ATM call round-trip", iv.impliedVol, 0.20, 1e-6);
+            check("TC17 IV ATM call round-trip", iv.impliedVol, 0.20, 1e-6);
         }
 
-        // TC16: ATM put round-trip
+        // TC18: ATM put round-trip
         {
             EuropeanOption put(100.0, 1.0, OptionType::Put);
             const double mktPrice = bs.price(put, m).price;
             const auto iv = solveIV(mktPrice, OptionType::Put, 100.0, 100.0, 0.05, 1.0);
-            check("TC16 IV ATM put round-trip",  iv.impliedVol, 0.20, 1e-6);
+            check("TC18 IV ATM put round-trip",  iv.impliedVol, 0.20, 1e-6);
         }
 
-        // TC17: Deep ITM call (S=120, K=100)
+        // TC19: Deep ITM call (S=120, K=100)
         {
             MarketData m2{ 120.0, 0.05, 0.30 };
             EuropeanOption call(100.0, 1.0, OptionType::Call);
             const double mktPrice = bs.price(call, m2).price;
             const auto iv = solveIV(mktPrice, OptionType::Call, 120.0, 100.0, 0.05, 1.0);
-            check("TC17 IV deep ITM call round-trip", iv.impliedVol, 0.30, 1e-6);
+            check("TC19 IV deep ITM call round-trip", iv.impliedVol, 0.30, 1e-6);
         }
 
-        // TC18: Deep OTM put (S=120, K=100)
+        // TC20: Deep OTM put (S=120, K=100)
         {
             MarketData m2{ 120.0, 0.05, 0.30 };
             EuropeanOption put(100.0, 1.0, OptionType::Put);
             const double mktPrice = bs.price(put, m2).price;
             const auto iv = solveIV(mktPrice, OptionType::Put, 120.0, 100.0, 0.05, 1.0);
-            check("TC18 IV deep OTM put round-trip", iv.impliedVol, 0.30, 1e-6);
+            check("TC20 IV deep OTM put round-trip", iv.impliedVol, 0.30, 1e-6);
         }
 
-        // TC19: High-vol round-trip (σ=80%)
+        // TC21: High-vol round-trip (σ=80%)
         {
             MarketData m3{ 100.0, 0.05, 0.80 };
             EuropeanOption call(100.0, 1.0, OptionType::Call);
             const double mktPrice = bs.price(call, m3).price;
             const auto iv = solveIV(mktPrice, OptionType::Call, 100.0, 100.0, 0.05, 1.0);
-            check("TC19 IV high-vol (80%) round-trip", iv.impliedVol, 0.80, 1e-6);
+            check("TC21 IV high-vol (80%) round-trip", iv.impliedVol, 0.80, 1e-6);
         }
 
-        // TC20: Price below intrinsic — solver must reject cleanly
+        // TC22: Price below intrinsic — solver must reject cleanly
         {
             const double intrinsic = std::max(100.0 - 80.0 * std::exp(-0.05 * 1.0), 0.0);
             const auto iv = solveIV(intrinsic - 1.0, OptionType::Call,
                                     100.0, 80.0, 0.05, 1.0);
-            check("TC20 IV rejects sub-intrinsic price",
+            check("TC22 IV rejects sub-intrinsic price",
                   iv.converged ? 0.0 : 1.0, 1.0, 0.5);
         }
     }

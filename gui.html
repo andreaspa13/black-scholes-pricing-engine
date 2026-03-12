@@ -240,6 +240,26 @@
     font-size: 13px; color: var(--warn); line-height: 1.5;
   }
 
+  /* ── Variance reduction toggle ── */
+  .vr-toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  .vr-toggle {
+    position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0;
+  }
+  .vr-toggle input { opacity: 0; width: 0; height: 0; }
+  .vr-slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; transition: background 0.2s, border-color 0.2s;
+  }
+  .vr-slider::before {
+    content: ""; position: absolute;
+    width: 14px; height: 14px; left: 2px; top: 2px;
+    background: var(--muted); border-radius: 50%; transition: transform 0.2s, background 0.2s;
+  }
+  .vr-toggle input:checked + .vr-slider { background: rgba(88,166,255,0.2); border-color: var(--accent); }
+  .vr-toggle input:checked + .vr-slider::before { transform: translateX(16px); background: var(--accent); }
+  .vr-label { font-size: 13px; color: var(--text-dim); }
+
   /* ── Implied Volatility section ── */
   .iv-section {
     margin-top: 24px; background: var(--surface);
@@ -455,6 +475,17 @@
             <button onclick="step('vis',5)">+</button>
           </div>
         </div>
+
+        <div class="input-group">
+          <label>Variance reduction <span class="info" data-tip="<b>Antithetic Variates</b><br>For each random draw Z, also simulates a mirror path using −Z. The two payoffs are averaged into one sample.<br><br>Because calls and puts are monotone in the stock price, f(+Z) and f(−Z) are negatively correlated — their average has lower variance than either alone. This reduces the standard error without extra RNG draws, producing tighter confidence intervals for the same path count.">i</span></label>
+          <div class="vr-toggle-row">
+            <label class="vr-toggle">
+              <input type="checkbox" id="use-antithetic">
+              <span class="vr-slider"></span>
+            </label>
+            <span class="vr-label" id="vr-label">Off</span>
+          </div>
+        </div>
       </div>
 
       <button class="run-btn" id="run-btn" onclick="runAll()">Run Pricing</button>
@@ -607,8 +638,8 @@
       </div>
       <div class="chart-panel">
         <div class="panel-title">
-          MC Convergence to BS Price
-          <span class="info" data-tip="<b>Convergence Chart</b><br>Shows how the MC price estimate improves as more paths are simulated (x-axis is on a log scale).<br><br>The <span style='color:#58a6ff'>blue dashed line</span> is the exact Black-Scholes price. The <span style='color:#3fb950'>green line</span> is the MC estimate - it should converge to the BS line as paths increase. The shaded band is the 95% confidence interval, which narrows as N grows.">i</span>
+          <span id="conv-title">MC Convergence to BS Price</span>
+          <span class="info" data-tip="<b>Convergence Chart</b><br>Shows how the MC price estimate improves as more paths are simulated (x-axis is on a log scale).<br><br>The <span style='color:#58a6ff'>blue dashed line</span> is the exact Black-Scholes price. The <span style='color:#3fb950'>green line</span> is the MC estimate - it should converge to the BS line as paths increase. The shaded band is the 95% confidence interval, which narrows as N grows.<br><br>With <b>antithetic variates</b> enabled, the CI band will be visibly narrower for the same path count — the variance reduction is directly observable here.">i</span>
         </div>
         <canvas id="conv-canvas" height="200"></canvas>
       </div>
@@ -907,6 +938,7 @@ async function runAll() {
   const S = getVal('S'), K = getVal('K'), r = getVal('r') / 100;
   const sigma = getVal('sigma') / 100, T = getVal('T'), N = getVal('N'), vis = getVal('vis');
   const col = optionType === 'call' ? 'call' : 'put';
+  const useAntithetic = document.getElementById('use-antithetic').checked;
 
   let res;
   try {
@@ -914,7 +946,8 @@ async function runAll() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ S, K, r, sigma, T, type: optionType,
-                             numPaths: Math.round(N), numVisPaths: Math.round(vis) })
+                             numPaths: Math.round(N), numVisPaths: Math.round(vis),
+                             useAntithetic })
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -948,6 +981,12 @@ async function runAll() {
   document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
 
   const mc = res.mc;
+  const avActive = res.varReduction === 'antithetic';
+  // Update toggle label and convergence chart title to reflect active technique
+  document.getElementById('vr-label').textContent = avActive ? 'Antithetic variates' : 'Off';
+  document.getElementById('conv-title').textContent =
+    avActive ? 'MC+AV Convergence to BS Price' : 'MC Convergence to BS Price';
+
   document.getElementById('mc-price').textContent  = mc.price.toFixed(6);
   document.getElementById('mc-price').className    = 'metric-value ' + col;
   document.getElementById('mc-stderr').textContent = mc.stdErr.toFixed(6);
@@ -955,7 +994,8 @@ async function runAll() {
   const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
   document.getElementById('mc-ci').textContent = `[${lo}, ${hi}]`;
   const devs = Math.abs(mc.price - bs.price) / mc.stdErr;
-  document.getElementById('mc-status').textContent = `MC within ${devs.toFixed(2)}σ of BS price`;
+  const avTag = avActive ? ' (AV)' : '';
+  document.getElementById('mc-status').textContent = `MC${avTag} within ${devs.toFixed(2)}σ of BS price`;
 
   // Parity
   const parBar = document.getElementById('parity-bar'); parBar.style.display = 'flex';

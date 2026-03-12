@@ -8,6 +8,18 @@
 namespace options {
 
 /**
+ * Variance reduction technique applied during Monte Carlo simulation.
+ *
+ * Kept as a separate enum so new techniques (control variates, importance
+ * sampling, stratified sampling) can be added without changing the class
+ * interface — just extend the enum and add a branch in price().
+ */
+enum class VarianceReduction {
+    None,       // plain Monte Carlo, one path per random draw
+    Antithetic  // antithetic variates: each draw Z generates paths for +Z and −Z
+};
+
+/**
  * Monte Carlo pricer using Geometric Brownian Motion path simulation.
  *
  * Simulates N paths of the underlying under the risk-neutral measure:
@@ -38,23 +50,29 @@ namespace options {
 class MonteCarloModel : public PricingModel {
 public:
     /**
-     * @param numPaths  Number of simulated paths. More paths → lower stderr,
-     *                  roughly stderr ∝ 1/sqrt(numPaths).
-     * @param numSteps  Time steps per path. For plain European options a
-     *                  single step suffices (only terminal value matters).
-     *                  numSteps > 1 is scaffolding for path-dependent options.
-     * @param seed      RNG seed for reproducibility.
+     * @param numPaths     Number of simulated paths. More paths → lower stderr,
+     *                     roughly stderr ∝ 1/sqrt(numPaths).
+     * @param numSteps     Time steps per path. For plain European options a
+     *                     single step suffices (only terminal value matters).
+     *                     numSteps > 1 is scaffolding for path-dependent options.
+     * @param seed         RNG seed for reproducibility.
+     * @param varReduction Variance reduction technique to apply.
+     *                     Antithetic: generates N/2 pairs (Z, −Z), halving the
+     *                     number of RNG draws while typically reducing variance
+     *                     more than proportionally for monotone payoffs.
      */
     explicit MonteCarloModel(int numPaths = 100'000,
                              int numSteps = 1,
-                             unsigned seed = 42);
+                             unsigned seed = 42,
+                             VarianceReduction varReduction = VarianceReduction::None);
 
     PricingResult price(const Option& option,
                         const MarketData& market) const override;
 
 private:
-    int      numPaths_;
-    int      numSteps_;
+    int              numPaths_;
+    int              numSteps_;
+    VarianceReduction varReduction_;
 
     // mutable because price() is const but RNG advances on each draw.
     // See class-level note above.
