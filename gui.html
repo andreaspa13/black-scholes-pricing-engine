@@ -180,6 +180,20 @@
   .metric-small .metric-value { font-size: 16px; font-family: monospace; color: var(--text-dim); }
 
   .mc-status { font-size: 12px; color: var(--muted); margin-top: 8px; height: 15px; font-family: monospace; }
+  .mc-estimator-box {
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .mc-estimator-label {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.7px; color: var(--muted); flex-shrink: 0;
+  }
+  .mc-estimator-formula {
+    font-size: 13px; font-family: 'Georgia', 'Times New Roman', serif;
+    color: var(--text-dim); letter-spacing: 0.3px; font-style: italic;
+  }
+  .mc-estimator-formula sup, .mc-estimator-formula sub { font-size: 9px; font-style: normal; }
+  .mc-sigma { font-style: normal; font-size: 15px; color: var(--muted); }
 
   /* ── Parity bar ── */
   .parity-bar {
@@ -598,6 +612,10 @@
           </div>
         </div>
         <div class="mc-status" id="mc-status"></div>
+        <div class="mc-estimator-box">
+          <span class="mc-estimator-label">Estimator</span>
+          <span class="mc-estimator-formula">V&#x0302; = e<sup>−rT</sup> · (1/N) <span class="mc-sigma">Σ</span> payoff(S<sub>T</sub><sup>i</sup>)</span>
+        </div>
       </div>
     </div>
 
