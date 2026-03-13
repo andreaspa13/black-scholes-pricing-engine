@@ -1405,7 +1405,7 @@ function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig) 
   ctx.clearRect(0, 0, W, H);
 
   // Padding: left for y-axis title+labels, bottom for x-axis labels+title
-  const PADL = 52 * dpr, PADR = 6 * dpr, PADT = 8 * dpr, PADB = 34 * dpr;
+  const PADL = 54 * dpr, PADR = 6 * dpr, PADT = 10 * dpr, PADB = 46 * dpr;
   const plotW = W - PADL - PADR;
   const plotH = H - PADT - PADB;
   const nS = sVals.length, nSig = sigVals.length;
@@ -1433,40 +1433,48 @@ function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig) 
 
       // Value label — white with dark outline for contrast on any bg
       const label = fmtCell(v);
-      ctx.font = `bold ${7.5 * dpr}px monospace`;
+      ctx.font = `bold ${Math.round(8 * dpr)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const cx = x + cellW / 2, cy = y + cellH / 2;
-      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.lineWidth = 2.5 * dpr;
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 1.5 * dpr;
       ctx.lineJoin = 'round';
       ctx.strokeText(label, cx, cy);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
       ctx.fillText(label, cx, cy);
     }
   }
   ctx.restore();
 
-  // ── X axis labels ──
-  ctx.fillStyle = 'rgba(139,148,158,0.9)';
-  ctx.font = `${10 * dpr}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  for (const i of [0, Math.floor(nS / 2), nS - 1]) {
-    ctx.fillText(sVals[i].toFixed(0), PADL + i * cellW + cellW / 2, H - PADB / 2 + 2 * dpr);
+  // ── X axis labels (rotated –45° so all 15 values fit without overlap) ──
+  ctx.fillStyle = 'rgba(200,210,220,1.0)';
+  ctx.font = `${9 * dpr}px sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < nS; i++) {
+    const cx = PADL + i * cellW + cellW / 2;
+    const cy = H - PADB + 6 * dpr;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(sVals[i].toFixed(0), 0, 0);
+    ctx.restore();
   }
 
   // ── X axis title ──
-  ctx.fillStyle = 'rgba(139,148,158,0.6)';
-  ctx.font = `${9 * dpr}px sans-serif`;
-  ctx.fillText('Spot Price (S)', PADL + plotW / 2, H - 4 * dpr);
+  ctx.fillStyle = 'rgba(200,210,220,0.9)';
+  ctx.font = `bold ${10 * dpr}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('Spot Price (S)', PADL + plotW / 2, H - 3 * dpr);
 
-  // ── Y axis labels ──
-  ctx.fillStyle = 'rgba(139,148,158,0.9)';
-  ctx.font = `${10 * dpr}px monospace`;
+  // ── Y axis labels (all rows) ──
+  ctx.fillStyle = 'rgba(200,210,220,1.0)';
+  ctx.font = `${9 * dpr}px sans-serif`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  for (const i of [0, Math.floor(nSig / 2), nSig - 1]) {
+  for (let i = 0; i < nSig; i++) {
     const y = PADT + (nSig - 1 - i) * cellH + cellH / 2;
     ctx.fillText((sigVals[i] * 100).toFixed(0) + '%', PADL - 6 * dpr, y);
   }
@@ -1475,8 +1483,8 @@ function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig) 
   ctx.save();
   ctx.translate(12 * dpr, PADT + plotH / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = 'rgba(139,148,158,0.6)';
-  ctx.font = `${9 * dpr}px sans-serif`;
+  ctx.fillStyle = 'rgba(200,210,220,0.9)';
+  ctx.font = `bold ${10 * dpr}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.fillText('Volatility (σ)', 0, 0);
