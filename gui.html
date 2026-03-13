@@ -720,10 +720,10 @@
 <div class="heatmap-section">
   <div class="heatmap-header">
     <div class="panel-title" style="margin-bottom:0">
-      BS Price &amp; P&amp;L Surface
-      <span class="info" data-tip="<b>BS Price &amp; P&amp;L Surface</b><br>A 2D heatmap of the Black-Scholes option price across a grid of spot prices (x-axis) and volatilities (y-axis), with K, r and T fixed from the main panel.<br><br>The <b>white crosshair</b> marks your current S and &sigma; from the main panel. The P&amp;L heatmaps show your profit or loss relative to the purchase price you entered.">i</span>
+      Option Price &amp; P&amp;L Scenario Surface
+      <span class="info" data-tip="<b>Option Price &amp; P&amp;L Scenario Surface</b><br>A 2D heatmap of the Black-Scholes option price across a grid of spot prices (x-axis) and volatilities (y-axis), with K, r and T fixed from the main panel.<br><br>The <b>white cell outline</b> marks your current S and &sigma; from the main panel. The P&amp;L heatmaps show your profit or loss relative to the purchase price you entered.">i</span>
     </div>
-    <span class="heatmap-note">K, r, T fixed from main panel &nbsp;&middot;&nbsp; crosshair = current S / &sigma;</span>
+    <span class="heatmap-note" id="heatmap-note">K, r, T fixed from main panel</span>
   </div>
 
   <div class="heatmap-controls">
@@ -1347,6 +1347,10 @@ async function computeIV() {
 }
 
 // ── Heatmap ───────────────────────────────────────────────────────────────────
+function fmtExpiry(T) {
+  if (T >= 1) return (Number.isInteger(T) ? T : T.toFixed(1)) + 'Y';
+  return Math.round(T * 12) + 'M';
+}
 
 // BS formula in JS — used only for the heatmap grid (display, not pricing)
 function bsCalc(S, K, r, sigma, T, type) {
@@ -1386,9 +1390,8 @@ function pnlColor(t) {
 // Cell value formatter: tight but informative
 function fmtCell(v) {
   const a = Math.abs(v);
-  if (a < 1)  return v.toFixed(2);
-  if (a < 10) return v.toFixed(1);
-  return v.toFixed(0);
+  if (a < 0.1) return v.toFixed(3);
+  return v.toFixed(2);
 }
 
 // Returns the CSS pixel height used (for legend sizing)
@@ -1490,30 +1493,23 @@ function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig) 
   ctx.fillText('Volatility (σ)', 0, 0);
   ctx.restore();
 
-  // ── Crosshair ──
+  // ── Current-parameter cell outline ──
   if (crossS != null && crossSig != null) {
     const fx = (crossS   - sVals[0])   / (sVals[nS - 1]   - sVals[0]);
     const fy = (crossSig - sigVals[0]) / (sigVals[nSig - 1] - sigVals[0]);
     if (fx >= 0 && fx <= 1 && fy >= 0 && fy <= 1) {
-      const px = PADL + fx * plotW;
-      const py = PADT + (1 - fy) * plotH;
-      const r  = 6 * dpr;
+      const si = Math.min(nS   - 1, Math.floor(fx * nS));
+      const vi = Math.min(nSig - 1, Math.floor(fy * nSig));
+      const cx = PADL + si * cellW;
+      const cy = PADT + (nSig - 1 - vi) * cellH;
+      // Dark shadow for contrast on any cell colour
       ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-      ctx.lineWidth = 3 * dpr;
-      ctx.beginPath();
-      ctx.moveTo(px - r, py); ctx.lineTo(px + r, py);
-      ctx.moveTo(px, py - r); ctx.lineTo(px, py + r);
-      ctx.stroke();
+      ctx.lineWidth = 4 * dpr;
+      ctx.strokeRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
+      // Bright white outline
       ctx.strokeStyle = 'white';
-      ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath();
-      ctx.moveTo(px - r, py); ctx.lineTo(px + r, py);
-      ctx.moveTo(px, py - r); ctx.lineTo(px, py + r);
-      ctx.stroke();
-      ctx.fillStyle = 'white';
-      ctx.beginPath();
-      ctx.arc(px, py, 3 * dpr, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.lineWidth = 2.5 * dpr;
+      ctx.strokeRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
     }
   }
   return size;  // CSS pixel size of the square canvas
@@ -1626,6 +1622,12 @@ function computeHeatmaps() {
 
   const crossS   = lastResults ? lastResults.S     : null;
   const crossSig = lastResults ? lastResults.sigma : null;
+
+  // Update fixed-params note
+  const s = sym();
+  const noteEl = document.getElementById('heatmap-note');
+  if (noteEl) noteEl.innerHTML =
+    `K = ${s}${K.toFixed(0)} &nbsp;&middot;&nbsp; r = ${(r * 100).toFixed(1)}% &nbsp;&middot;&nbsp; Expiry = ${fmtExpiry(T)} &nbsp;&middot;&nbsp; <i style="opacity:0.65">fixed from main panel</i>`;
 
   const h1 = drawHeatmap('hm-call-price', cpGrid,   priceColor, sVals, sigVals, crossS, crossSig);
   const h2 = drawHeatmap('hm-put-price',  ppGrid,   priceColor, sVals, sigVals, crossS, crossSig);
