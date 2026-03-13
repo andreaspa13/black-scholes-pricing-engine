@@ -883,6 +883,24 @@ function setType(t) {
   document.getElementById('btn-call').className = t === 'call' ? 'active-call' : '';
   document.getElementById('btn-put').className  = t === 'put'  ? 'active-put'  : '';
   const col = t === 'call' ? 'call' : 'put';
+
+  if (lastResults) {
+    // Pick the stored result that matches the newly selected type
+    const bs = (t === lastResults.pricedType) ? lastResults.bs : lastResults.bsOther;
+
+    document.getElementById('bs-price').textContent = bs.price.toFixed(6);
+    document.getElementById('bs-price').className   = 'metric-value ' + col;
+    document.getElementById('bs-delta').textContent = bs.delta.toFixed(6);
+    document.getElementById('bs-d1').textContent    = bs.d1.toFixed(4);
+    document.getElementById('bs-d2').textContent    = bs.d2.toFixed(4);
+    document.getElementById('bs-gamma').textContent = bs.gamma.toFixed(6);
+    document.getElementById('bs-vega').textContent  = bs.vega.toFixed(6);
+    document.getElementById('bs-theta').textContent = bs.theta.toFixed(6);
+    document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
+
+    // Keep MC colour in sync (MC was priced for the other type but the display colour should match)
+    document.getElementById('mc-price').className = 'metric-value ' + col;
+  }
   ['bs-price','mc-price'].forEach(id => {
     const el = document.getElementById(id);
     if (el.textContent !== '-') el.className = 'metric-value ' + col;
@@ -1054,8 +1072,9 @@ async function runAll() {
   // Attach N_d2 for the explain modal's probITM display
   bs.N_d2 = normCDF(bs.d2);
 
-  // Store for explanation
-  lastResults = { S, K, r, sigma, T, N, bs, bsCall, bsPut, mc, devs,
+  // Store for explanation and type-switching
+  lastResults = { S, K, r, sigma, T, N, bs, bsOther, bsCall, bsPut, mc, devs,
+                  pricedType: optionType,
                   series: res.convergence, paths: res.paths };
 
   btn.disabled = false; btn.textContent = 'Run Pricing';
