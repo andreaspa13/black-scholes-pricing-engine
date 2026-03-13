@@ -1034,73 +1034,151 @@ function normCDF(x) {
 }
 
 // ── Canvas ────────────────────────────────────────────────────────────────────
+function fmtAx(v) {
+  const a = Math.abs(v);
+  if (a === 0) return '0';
+  if (a < 0.01) return v.toFixed(3);
+  if (a < 1)    return v.toFixed(2);
+  if (a < 10)   return v.toFixed(1);
+  if (a < 1000) return v.toFixed(0);
+  return (v / 1000).toFixed(1) + 'k';
+}
+
 function drawPaths(canvas, paths, S, K) {
-  const ctx=canvas.getContext('2d');
-  const W=canvas.width=canvas.offsetWidth*devicePixelRatio;
-  const H=canvas.height=(canvas.offsetHeight||200)*devicePixelRatio;
-  ctx.clearRect(0,0,W,H);
-  const allV=paths.flat(), minV=Math.min(...allV)*0.98, maxV=Math.max(...allV)*1.02;
-  const steps=paths[0].length-1;
-  const px=i=>(i/steps)*(W-20)+10;
-  const py=v=>H-((v-minV)/(maxV-minV))*(H-20)-10;
-  // Strike
-  ctx.strokeStyle='rgba(247,129,102,0.4)'; ctx.lineWidth=devicePixelRatio;
-  ctx.setLineDash([4*devicePixelRatio,4*devicePixelRatio]);
-  ctx.beginPath(); ctx.moveTo(px(0),py(K)); ctx.lineTo(px(steps),py(K)); ctx.stroke();
+  const ctx = canvas.getContext('2d');
+  const dpr = devicePixelRatio;
+  const W   = canvas.width  = canvas.offsetWidth * dpr;
+  const H   = canvas.height = (canvas.offsetHeight || 200) * dpr;
+  ctx.clearRect(0, 0, W, H);
+
+  const fs  = Math.sqrt(H / (200 * dpr));
+  const fSm = Math.round(8 * dpr * fs);
+  const PL  = Math.round(40 * dpr * Math.min(fs, 1.8));
+  const PR  = Math.round(8 * dpr);
+  const PT  = Math.round(6 * dpr);
+  const PB  = Math.round(20 * dpr * Math.min(fs, 1.8));
+  const pw  = W - PL - PR, ph = H - PT - PB;
+
+  const allV  = paths.flat();
+  const minV  = Math.min(...allV) * 0.98, maxV = Math.max(...allV) * 1.02;
+  const steps = paths[0].length - 1;
+  const px    = i => PL + (i / steps) * pw;
+  const py    = v => PT + (1 - (v - minV) / (maxV - minV)) * ph;
+
+  // Y-axis grid + labels
+  ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 4; i++) {
+    const v = minV + (maxV - minV) * i / 4, y = py(v);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,210,220,0.55)';
+    ctx.fillText(fmtAx(v), PL - 4 * dpr, y);
+  }
+
+  // X-axis labels
+  ctx.font = `${fSm}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.45)';
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';  ctx.fillText('Now',    PL,     H - 3 * dpr);
+  ctx.textAlign = 'right'; ctx.fillText('Expiry', W - PR, H - 3 * dpr);
+
+  // Strike and spot reference lines
+  ctx.strokeStyle = 'rgba(247,129,102,0.4)'; ctx.lineWidth = dpr;
+  ctx.setLineDash([4 * dpr, 4 * dpr]);
+  ctx.beginPath(); ctx.moveTo(PL, py(K)); ctx.lineTo(W - PR, py(K)); ctx.stroke();
+  ctx.strokeStyle = 'rgba(88,166,255,0.25)';
+  ctx.beginPath(); ctx.moveTo(PL, py(S)); ctx.lineTo(W - PR, py(S)); ctx.stroke();
   ctx.setLineDash([]);
-  // Spot
-  ctx.strokeStyle='rgba(88,166,255,0.25)';
-  ctx.beginPath(); ctx.moveTo(px(0),py(S)); ctx.lineTo(px(steps),py(S)); ctx.stroke();
+
   // Paths
-  for(const path of paths){
-    const term=path[path.length-1];
-    const itm=optionType==='call'?term>K:term<K;
-    ctx.strokeStyle=itm?'rgba(63,185,80,0.45)':'rgba(88,166,255,0.22)';
-    ctx.lineWidth=devicePixelRatio;
+  for (const path of paths) {
+    const term = path[path.length - 1];
+    const itm  = optionType === 'call' ? term > K : term < K;
+    ctx.strokeStyle = itm ? 'rgba(63,185,80,0.45)' : 'rgba(88,166,255,0.22)';
+    ctx.lineWidth = dpr;
     ctx.beginPath();
-    path.forEach((v,i)=>i===0?ctx.moveTo(px(i),py(v)):ctx.lineTo(px(i),py(v)));
+    path.forEach((v, i) => i === 0 ? ctx.moveTo(px(i), py(v)) : ctx.lineTo(px(i), py(v)));
     ctx.stroke();
   }
-  ctx.font=`${10*devicePixelRatio}px monospace`;
-  ctx.fillStyle='rgba(247,129,102,0.7)';
-  ctx.fillText('K='+K.toFixed(0), W-56*devicePixelRatio, py(K)-4*devicePixelRatio);
-  ctx.fillStyle='rgba(88,166,255,0.7)';
-  ctx.fillText('S='+S.toFixed(0), 12*devicePixelRatio, py(S)-4*devicePixelRatio);
+
+  // K and S labels
+  ctx.font = `${fSm}px sans-serif`; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(247,129,102,0.8)'; ctx.textAlign = 'right';
+  ctx.fillText('K=' + K.toFixed(0), W - PR - 4 * dpr, py(K) - 4 * dpr);
+  ctx.fillStyle = 'rgba(88,166,255,0.8)'; ctx.textAlign = 'left';
+  ctx.fillText('S=' + S.toFixed(0), PL + 4 * dpr, py(S) - 4 * dpr);
 }
 
 function drawConvergence(canvas, series, bsPrice) {
-  const ctx=canvas.getContext('2d');
-  const W=canvas.width=canvas.offsetWidth*devicePixelRatio;
-  const H=canvas.height=(canvas.offsetHeight||200)*devicePixelRatio;
-  ctx.clearRect(0,0,W,H);
-  if(!series||series.length<2) return;
-  const allY=[...series.map(s=>s.price+2*s.se),...series.map(s=>s.price-2*s.se),bsPrice];
-  const minY=Math.min(...allY)*0.995, maxY=Math.max(...allY)*1.005;
-  const logNs=series.map(s=>Math.log10(s.n));
-  const minL=logNs[0], maxL=logNs[logNs.length-1];
-  const px=n=>((Math.log10(n)-minL)/(maxL-minL))*(W-24*devicePixelRatio)+12*devicePixelRatio;
-  const py=v=>H-((v-minY)/(maxY-minY))*(H-20*devicePixelRatio)-10*devicePixelRatio;
-  // BS line
-  ctx.strokeStyle='rgba(88,166,255,0.6)'; ctx.lineWidth=1.5*devicePixelRatio;
-  ctx.setLineDash([6*devicePixelRatio,4*devicePixelRatio]);
-  ctx.beginPath(); ctx.moveTo(px(series[0].n),py(bsPrice)); ctx.lineTo(px(series[series.length-1].n),py(bsPrice)); ctx.stroke();
-  ctx.setLineDash([]);
-  // CI band
-  ctx.fillStyle='rgba(63,185,80,0.08)';
+  const ctx = canvas.getContext('2d');
+  const dpr = devicePixelRatio;
+  const W   = canvas.width  = canvas.offsetWidth * dpr;
+  const H   = canvas.height = (canvas.offsetHeight || 200) * dpr;
+  ctx.clearRect(0, 0, W, H);
+  if (!series || series.length < 2) return;
+
+  const fs   = Math.sqrt(H / (200 * dpr));
+  const fSm  = Math.round(8 * dpr * fs);
+  const PL   = Math.round(40 * dpr * Math.min(fs, 1.8));
+  const PR   = Math.round(8 * dpr);
+  const PT   = Math.round(8 * dpr);
+  const PB   = Math.round(20 * dpr * Math.min(fs, 1.8));
+  const pw   = W - PL - PR, ph = H - PT - PB;
+
+  const allY  = [...series.map(s => s.price + 2*s.se), ...series.map(s => s.price - 2*s.se), bsPrice];
+  const minY  = Math.min(...allY) * 0.995, maxY = Math.max(...allY) * 1.005;
+  const logNs = series.map(s => Math.log10(s.n));
+  const minL  = logNs[0], maxL = logNs[logNs.length - 1];
+  const px    = n => PL + ((Math.log10(n) - minL) / (maxL - minL)) * pw;
+  const py    = v => PT + (1 - (v - minY) / (maxY - minY)) * ph;
+
+  // Y-axis grid + labels
+  ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 4; i++) {
+    const v = minY + (maxY - minY) * i / 4, y = py(v);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,210,220,0.55)';
+    ctx.fillText(fmtAx(v), PL - 4 * dpr, y);
+  }
+
+  // X-axis: powers of 10 that fall in range
+  ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  for (let p = Math.ceil(minL); p <= maxL; p++) {
+    const n = Math.pow(10, p), x = px(n);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, H - PB); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,210,220,0.55)';
+    ctx.fillText(n >= 1000 ? (n/1000) + 'k' : String(n), x, H - 3 * dpr);
+  }
+
+  // BS dashed line
+  ctx.strokeStyle = 'rgba(88,166,255,0.6)'; ctx.lineWidth = 1.5 * dpr;
+  ctx.setLineDash([6 * dpr, 4 * dpr]);
   ctx.beginPath();
-  series.forEach((s,i)=>i===0?ctx.moveTo(px(s.n),py(s.price+2*s.se)):ctx.lineTo(px(s.n),py(s.price+2*s.se)));
-  [...series].reverse().forEach(s=>ctx.lineTo(px(s.n),py(s.price-2*s.se)));
+  ctx.moveTo(px(series[0].n), py(bsPrice));
+  ctx.lineTo(px(series[series.length - 1].n), py(bsPrice));
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // CI band
+  ctx.fillStyle = 'rgba(63,185,80,0.08)';
+  ctx.beginPath();
+  series.forEach((s, i) => i === 0 ? ctx.moveTo(px(s.n), py(s.price + 2*s.se)) : ctx.lineTo(px(s.n), py(s.price + 2*s.se)));
+  [...series].reverse().forEach(s => ctx.lineTo(px(s.n), py(s.price - 2*s.se)));
   ctx.closePath(); ctx.fill();
+
   // MC line
-  ctx.strokeStyle='rgba(63,185,80,0.9)'; ctx.lineWidth=2*devicePixelRatio;
-  ctx.beginPath(); series.forEach((s,i)=>i===0?ctx.moveTo(px(s.n),py(s.price)):ctx.lineTo(px(s.n),py(s.price))); ctx.stroke();
-  // Labels
-  ctx.font=`${9*devicePixelRatio}px monospace`;
-  ctx.fillStyle='rgba(88,166,255,0.8)';
-  ctx.fillText('BS '+sym()+bsPrice.toFixed(4),14*devicePixelRatio,py(bsPrice)-5*devicePixelRatio);
-  const last=series[series.length-1];
-  ctx.fillStyle='rgba(63,185,80,0.8)';
-  ctx.fillText('MC '+sym()+last.price.toFixed(4),px(last.n)-64*devicePixelRatio,py(last.price)-5*devicePixelRatio);
+  ctx.strokeStyle = 'rgba(63,185,80,0.9)'; ctx.lineWidth = 2 * dpr;
+  ctx.beginPath();
+  series.forEach((s, i) => i === 0 ? ctx.moveTo(px(s.n), py(s.price)) : ctx.lineTo(px(s.n), py(s.price)));
+  ctx.stroke();
+
+  // Floating price labels
+  ctx.font = `${fSm}px sans-serif`; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(88,166,255,0.8)'; ctx.textAlign = 'left';
+  ctx.fillText('BS ' + sym() + bsPrice.toFixed(4), PL + 4 * dpr, py(bsPrice) - 4 * dpr);
+  const last = series[series.length - 1];
+  ctx.fillStyle = 'rgba(63,185,80,0.8)'; ctx.textAlign = 'right';
+  ctx.fillText('MC ' + sym() + last.price.toFixed(4), px(last.n) - 4 * dpr, py(last.price) - 4 * dpr);
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
@@ -1451,17 +1529,21 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
   const H   = canvas.height = (canvas.offsetHeight || 200) * dpr;
   ctx.clearRect(0, 0, W, H);
 
-  const PL = 12 * dpr, PR = 12 * dpr, PT = 18 * dpr, PB = 10 * dpr;
-  const pw = W - PL - PR, ph = H - PT - PB;
+  const fs  = Math.sqrt(H / (200 * dpr));
+  const fSm = Math.round(8 * dpr * fs);
+  const PL  = Math.round(8 * dpr);
+  const PR  = Math.round(8 * dpr);
+  const PT  = Math.round(20 * dpr * Math.min(fs, 1.8));   // room for S/K labels at top
+  const PB  = Math.round(20 * dpr * Math.min(fs, 1.8));   // room for X-axis labels
+  const pw  = W - PL - PR, ph = H - PT - PB;
 
   const N_PTS = 100;
-  // Range must always include both S and K so ATM region (gamma/vega peak) is visible
   const center   = (S + K) / 2;
   const halfSpan = Math.max(Math.abs(S - K) * 1.2, S * 0.35, K * 0.35);
   const sMin     = Math.max(center - halfSpan, 0.01), sMax = center + halfSpan;
-  const spots = Array.from({ length: N_PTS }, (_, i) => sMin + (sMax - sMin) * i / (N_PTS - 1));
+  const spots    = Array.from({ length: N_PTS }, (_, i) => sMin + (sMax - sMin) * i / (N_PTS - 1));
 
-  const res   = spots.map(s => bsCalc(s, K, r, sigma, T, type));
+  const res    = spots.map(s => bsCalc(s, K, r, sigma, T, type));
   const series = {
     delta: res.map(r => r.delta),
     gamma: res.map(r => r.gamma),
@@ -1471,57 +1553,81 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
 
   const px = s => PL + (s - sMin) / (sMax - sMin) * pw;
 
-  // Normalise each series independently to occupy [PT+ph*0.05, PT+ph*0.95]
+  // Subtle horizontal reference lines at 0%, 50%, 100% of normalised range
+  [0.05, 0.5, 0.95].forEach(f => {
+    const y = PT + f * ph;
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 0.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
+  });
+
+  // X-axis tick marks + labels (5 spot values)
+  ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  const xN = 4;
+  for (let i = 0; i <= xN; i++) {
+    const s = sMin + (sMax - sMin) * i / xN;
+    const x = px(s);
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 0.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, H - PB); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,210,220,0.55)';
+    ctx.fillText(fmtAx(s), x, H - 3 * dpr);
+  }
+
+  // Normalise each series independently to [PT+ph*0.05, PT+ph*0.95]
   function normY(vals) {
     const lo = Math.min(...vals), hi = Math.max(...vals);
     const rng = hi - lo || 1;
     return vals.map(v => PT + (1 - (v - lo) / rng) * ph * 0.9 + ph * 0.05);
   }
 
-  // Vertical reference lines for S and K
+  // Vertical reference lines for S and K with labels
   function vLine(xPos, color, label) {
-    ctx.save();
     ctx.strokeStyle = color; ctx.lineWidth = 1 * dpr;
     ctx.setLineDash([4 * dpr, 3 * dpr]);
     ctx.beginPath(); ctx.moveTo(xPos, PT); ctx.lineTo(xPos, H - PB); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = color; ctx.font = `${8 * dpr}px sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillText(label, xPos, PT - 10 * dpr);
-    ctx.restore();
+    ctx.fillStyle = color; ctx.font = `${fSm}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(label, xPos, PT - 3 * dpr);
   }
-  vLine(px(S), 'rgba(88,166,255,0.55)',  'S');
-  vLine(px(K), 'rgba(255,215,0,0.55)',   'K');
+  vLine(px(S), 'rgba(88,166,255,0.55)', 'S');
+  vLine(px(K), 'rgba(255,215,0,0.55)',  'K');
 
-  // Draw a Greek line
+  // Greek lines
   function drawLine(ys, color) {
     ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr;
     ctx.beginPath();
     spots.forEach((s, i) => i === 0 ? ctx.moveTo(px(s), ys[i]) : ctx.lineTo(px(s), ys[i]));
     ctx.stroke();
   }
+  const yd = normY(series.delta), yg = normY(series.gamma);
+  const yv = normY(series.vega),  yt = normY(series.theta);
+  drawLine(yd, 'rgba(88,166,255,0.9)');
+  drawLine(yg, 'rgba(255,165,0,0.9)');
+  drawLine(yv, 'rgba(63,185,80,0.9)');
+  drawLine(yt, 'rgba(248,81,73,0.9)');
 
-  drawLine(normY(series.delta), 'rgba(88,166,255,0.9)');
-  drawLine(normY(series.gamma), 'rgba(255,165,0,0.9)');
-  drawLine(normY(series.vega),  'rgba(63,185,80,0.9)');
-  drawLine(normY(series.theta), 'rgba(248,81,73,0.9)');
-
-  // Legend (top-right)
-  const legend = [
-    ['Δ Delta', 'rgba(88,166,255,0.9)'],
-    ['Γ Gamma', 'rgba(255,165,0,0.9)'],
-    ['ν Vega',  'rgba(63,185,80,0.9)'],
-    ['Θ Theta', 'rgba(248,81,73,0.9)'],
+  // Values at current S annotated on the right edge
+  const atS = bsCalc(S, K, r, sigma, T, type);
+  const annotations = [
+    ['Δ ' + atS.delta.toFixed(3), 'rgba(88,166,255,0.85)'],
+    ['Γ ' + atS.gamma.toFixed(4), 'rgba(255,165,0,0.85)'],
+    ['ν ' + atS.vega.toFixed(3),  'rgba(63,185,80,0.85)'],
+    ['Θ ' + atS.theta.toFixed(4), 'rgba(248,81,73,0.85)'],
   ];
-  ctx.font = `${8 * dpr}px sans-serif`; ctx.textBaseline = 'middle';
-  let lx = W - PR - 54 * dpr, ly = PT + 6 * dpr;
-  legend.forEach(([label, color]) => {
-    ctx.fillStyle = color;
-    ctx.fillRect(lx, ly - 1 * dpr, 12 * dpr, 2.5 * dpr);
-    ctx.fillStyle = 'rgba(200,210,220,0.8)';
-    ctx.textAlign = 'left';
-    ctx.fillText(label, lx + 15 * dpr, ly);
-    ly += 11 * dpr;
+  ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  const annX = W - PR - 2 * dpr;
+  const annYs = [yd, yg, yv, yt].map(ys => {
+    const kIdx = spots.reduce((best, s, i) => Math.abs(s - S) < Math.abs(spots[best] - S) ? i : best, 0);
+    return ys[kIdx];
+  });
+  // Sort by Y position to prevent overlap
+  const sorted = annotations.map((a, i) => ({ label: a[0], color: a[1], y: annYs[i] }))
+    .sort((a, b) => a.y - b.y);
+  sorted.forEach((ann, i) => {
+    // Ensure minimum spacing
+    if (i > 0 && ann.y - sorted[i-1].y < fSm * 1.1) ann.y = sorted[i-1].y + fSm * 1.1;
+    ctx.fillStyle = ann.color;
+    ctx.fillText(ann.label, annX, ann.y);
   });
 }
 
@@ -1533,11 +1639,15 @@ function drawDecayChart(canvas, S, K, r, sigma, T) {
   const H   = canvas.height = (canvas.offsetHeight || 200) * dpr;
   ctx.clearRect(0, 0, W, H);
 
-  const PL = 12 * dpr, PR = 12 * dpr, PT = 10 * dpr, PB = 18 * dpr;
-  const pw = W - PL - PR, ph = H - PT - PB;
+  const fs  = Math.sqrt(H / (200 * dpr));
+  const fSm = Math.round(8 * dpr * fs);
+  const PL  = Math.round(40 * dpr * Math.min(fs, 1.8));
+  const PR  = Math.round(10 * dpr);
+  const PT  = Math.round(10 * dpr);
+  const PB  = Math.round(20 * dpr * Math.min(fs, 1.8));
+  const pw  = W - PL - PR, ph = H - PT - PB;
 
   const N_PTS = 100, tMin = 0.002;
-  // Left = now (T), right = expiry (tMin)
   const times = Array.from({ length: N_PTS }, (_, i) => T - (T - tMin) * i / (N_PTS - 1));
 
   const callPrices = times.map(t => bsCalc(S, K, r, sigma, t, 'call').price);
@@ -1545,13 +1655,47 @@ function drawDecayChart(canvas, S, K, r, sigma, T) {
   const intrCall   = Math.max(S - K, 0);
   const intrPut    = Math.max(K - S, 0);
 
-  const maxY = Math.max(...callPrices, ...putPrices) * 1.05 || 1;
+  const maxY = Math.max(...callPrices, ...putPrices) * 1.08 || 1;
   const minY = 0;
 
-  const px = t  => PL + (T - t)  / (T - tMin) * pw;   // T→left, 0→right
-  const py = v  => PT + (1 - (v - minY) / (maxY - minY)) * ph;
+  const px = t => PL + (T - t) / (T - tMin) * pw;
+  const py = v => PT + (1 - (v - minY) / (maxY - minY)) * ph;
 
-  // Intrinsic value reference lines
+  // ── Y-axis ticks + grid ───────────────────────────────────────────────────
+  ctx.font = `${fSm}px sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const N_YTICKS = 4;
+  for (let i = 0; i <= N_YTICKS; i++) {
+    const v = minY + (maxY - minY) * i / N_YTICKS;
+    const y = py(v);
+    ctx.fillStyle = 'rgba(200,210,220,0.55)';
+    ctx.fillText(fmtAx(v), PL - 4 * dpr, y);
+    ctx.strokeStyle = 'rgba(200,210,220,0.08)';
+    ctx.lineWidth = 1 * dpr;
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // ── X-axis ticks ─────────────────────────────────────────────────────────
+  // Show 4 evenly-spaced time ticks: T, 2T/3, T/3, ~0
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(200,210,220,0.55)';
+  const xTicks = [T, T * 2 / 3, T / 3, tMin];
+  const xLabels = [`${T.toFixed(2)}y`, `${(T * 2 / 3).toFixed(2)}y`, `${(T / 3).toFixed(2)}y`, 'Expiry'];
+  xTicks.forEach((t, i) => {
+    const x = px(t);
+    ctx.fillText(xLabels[i], x, PT + ph + 3 * dpr);
+    ctx.strokeStyle = 'rgba(200,210,220,0.08)';
+    ctx.lineWidth = 1 * dpr;
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, PT + ph); ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
+  // ── Intrinsic value reference lines ──────────────────────────────────────
   function hLine(v, color, label) {
     if (v < 0.001) return;
     const y = py(v);
@@ -1560,7 +1704,7 @@ function drawDecayChart(canvas, S, K, r, sigma, T) {
     ctx.setLineDash([4 * dpr, 3 * dpr]);
     ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = color; ctx.font = `${8 * dpr}px sans-serif`;
+    ctx.fillStyle = color; ctx.font = `${fSm}px sans-serif`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
     ctx.fillText(label, PL + 3 * dpr, y - 1 * dpr);
     ctx.restore();
@@ -1568,7 +1712,7 @@ function drawDecayChart(canvas, S, K, r, sigma, T) {
   hLine(intrCall, 'rgba(88,166,255,0.35)',  'call intrinsic');
   hLine(intrPut,  'rgba(248,81,73,0.35)',   'put intrinsic');
 
-  // Price lines
+  // ── Price lines ───────────────────────────────────────────────────────────
   function drawLine(prices, color) {
     ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr;
     ctx.beginPath();
@@ -1578,23 +1722,18 @@ function drawDecayChart(canvas, S, K, r, sigma, T) {
   drawLine(callPrices, 'rgba(88,166,255,0.9)');
   drawLine(putPrices,  'rgba(248,81,73,0.9)');
 
-  // X axis labels
-  ctx.font = `${8 * dpr}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.6)';
-  ctx.textBaseline = 'alphabetic';
-  ctx.textAlign = 'left';  ctx.fillText(`T=${T.toFixed(2)}y`, PL, H - 3 * dpr);
-  ctx.textAlign = 'right'; ctx.fillText('Expiry', W - PR, H - 3 * dpr);
-
-  // Legend (top-right)
+  // ── Legend (top-right) ────────────────────────────────────────────────────
   const legend = [['Call', 'rgba(88,166,255,0.9)'], ['Put', 'rgba(248,81,73,0.9)']];
-  ctx.font = `${8 * dpr}px sans-serif`; ctx.textBaseline = 'middle';
-  let lx = W - PR - 44 * dpr, ly = PT + 8 * dpr;
+  ctx.font = `${fSm}px sans-serif`; ctx.textBaseline = 'middle';
+  let lx = W - PR - Math.round(44 * dpr * Math.min(fs, 1.8));
+  let ly = PT + Math.round(8 * dpr * fs);
   legend.forEach(([label, color]) => {
     ctx.fillStyle = color;
-    ctx.fillRect(lx, ly - 1 * dpr, 12 * dpr, 2.5 * dpr);
+    ctx.fillRect(lx, ly - 1 * dpr, Math.round(12 * dpr * Math.min(fs, 1.5)), Math.round(2.5 * dpr));
     ctx.fillStyle = 'rgba(200,210,220,0.8)';
     ctx.textAlign = 'left';
-    ctx.fillText(label, lx + 15 * dpr, ly);
-    ly += 11 * dpr;
+    ctx.fillText(label, lx + Math.round(15 * dpr * Math.min(fs, 1.5)), ly);
+    ly += Math.round(11 * dpr * fs);
   });
 }
 
