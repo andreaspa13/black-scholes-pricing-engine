@@ -689,6 +689,24 @@
       </div>
     </div>
 
+    <!-- Greeks profile + Theta decay -->
+    <div class="charts-row" style="margin-top:16px">
+      <div class="chart-panel">
+        <div class="panel-title">
+          Greeks Profile
+          <span class="info" data-tip="<b>Greeks vs Spot Price</b><br>Shows how all four Greeks change as the underlying spot price varies (±50% around current S).<br><br><span style='color:#58a6ff'>Δ Delta</span>: S-curve from 0→1 (call) or −1→0 (put), steepest at the strike.<br><span style='color:rgba(255,165,0,0.9)'>Γ Gamma</span>: Bell curve peaking at ATM — where delta changes fastest.<br><span style='color:#3fb950'>ν Vega</span>: Also peaks ATM — options are most sensitive to vol changes when at-the-money.<br><span style='color:rgba(248,81,73,0.9)'>Θ Theta</span>: Always negative — time erodes value. Deepest near ATM.<br><br>Each Greek is normalised to its own range for readability. The dashed lines mark current S (blue) and K (gold).">i</span>
+        </div>
+        <canvas id="greeks-canvas" height="200"></canvas>
+      </div>
+      <div class="chart-panel">
+        <div class="panel-title">
+          Theta Decay
+          <span class="info" data-tip="<b>Option Price vs Time to Expiry</b><br>Shows how the call and put prices erode as time passes (left = today, right = expiry day).<br><br>The key insight: decay is <b>non-linear</b>. An option loses value slowly at first, then accelerates sharply in the last weeks before expiry. This is why short-dated options are dangerous to hold — theta risk is highest near expiry.<br><br>The dashed lines show the <b>intrinsic value</b> floor (max(S−K,0) for calls, max(K−S,0) for puts). The option price always decays toward intrinsic value as T→0.">i</span>
+        </div>
+        <canvas id="decay-canvas" height="200"></canvas>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -958,9 +976,11 @@ function setType(t) {
     const avTag = document.getElementById('use-antithetic').checked ? ' (AV)' : '';
     document.getElementById('mc-status').textContent = `MC${avTag} within ${devs.toFixed(2)}σ of BS price`;
 
-    // Redraw convergence chart for the selected type
+    // Redraw convergence + Greeks charts for the selected type
     const series = (t === lastResults.pricedType) ? lastResults.series : lastResults.seriesOther;
     drawConvergence(document.getElementById('conv-canvas'), series, bsForType.price);
+    drawGreeksChart(document.getElementById('greeks-canvas'),
+      lastResults.S, lastResults.K, lastResults.r, lastResults.sigma, lastResults.T, t);
   }
   ['bs-price','mc-price'].forEach(id => {
     const el = document.getElementById(id);
@@ -1130,6 +1150,8 @@ async function runAll() {
   // Charts — data comes directly from the server
   drawPaths(document.getElementById('path-canvas'), res.paths, S, K);
   drawConvergence(document.getElementById('conv-canvas'), res.convergence, bs.price);
+  drawGreeksChart(document.getElementById('greeks-canvas'), S, K, r, sigma, T, optionType);
+  drawDecayChart(document.getElementById('decay-canvas'),  S, K, r, sigma, T);
 
   // Attach N_d2 for the explain modal's probITM display
   bs.N_d2 = normCDF(bs.d2);
@@ -1364,6 +1386,158 @@ async function computeIV() {
   `;
 }
 
+// ── Greeks Profile Chart ───────────────────────────────────────────────────────
+function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
+  const ctx = canvas.getContext('2d');
+  const dpr = devicePixelRatio;
+  const W   = canvas.width  = canvas.offsetWidth * dpr;
+  const H   = canvas.height = 200 * dpr;
+  ctx.clearRect(0, 0, W, H);
+
+  const PL = 12 * dpr, PR = 12 * dpr, PT = 18 * dpr, PB = 10 * dpr;
+  const pw = W - PL - PR, ph = H - PT - PB;
+
+  const N_PTS = 100;
+  const sMin  = S * 0.5, sMax = S * 1.5;
+  const spots = Array.from({ length: N_PTS }, (_, i) => sMin + (sMax - sMin) * i / (N_PTS - 1));
+
+  const res   = spots.map(s => bsCalc(s, K, r, sigma, T, type));
+  const series = {
+    delta: res.map(r => r.delta),
+    gamma: res.map(r => r.gamma),
+    vega:  res.map(r => r.vega),
+    theta: res.map(r => r.theta),
+  };
+
+  const px = s => PL + (s - sMin) / (sMax - sMin) * pw;
+
+  // Normalise each series independently to occupy [PT+ph*0.05, PT+ph*0.95]
+  function normY(vals) {
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const rng = hi - lo || 1;
+    return vals.map(v => PT + (1 - (v - lo) / rng) * ph * 0.9 + ph * 0.05);
+  }
+
+  // Vertical reference lines for S and K
+  function vLine(xPos, color, label) {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.lineWidth = 1 * dpr;
+    ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(xPos, PT); ctx.lineTo(xPos, H - PB); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.font = `${8 * dpr}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(label, xPos, PT - 10 * dpr);
+    ctx.restore();
+  }
+  vLine(px(S), 'rgba(88,166,255,0.55)',  'S');
+  vLine(px(K), 'rgba(255,215,0,0.55)',   'K');
+
+  // Draw a Greek line
+  function drawLine(ys, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    spots.forEach((s, i) => i === 0 ? ctx.moveTo(px(s), ys[i]) : ctx.lineTo(px(s), ys[i]));
+    ctx.stroke();
+  }
+
+  drawLine(normY(series.delta), 'rgba(88,166,255,0.9)');
+  drawLine(normY(series.gamma), 'rgba(255,165,0,0.9)');
+  drawLine(normY(series.vega),  'rgba(63,185,80,0.9)');
+  drawLine(normY(series.theta), 'rgba(248,81,73,0.9)');
+
+  // Legend (top-right)
+  const legend = [
+    ['Δ Delta', 'rgba(88,166,255,0.9)'],
+    ['Γ Gamma', 'rgba(255,165,0,0.9)'],
+    ['ν Vega',  'rgba(63,185,80,0.9)'],
+    ['Θ Theta', 'rgba(248,81,73,0.9)'],
+  ];
+  ctx.font = `${8 * dpr}px sans-serif`; ctx.textBaseline = 'middle';
+  let lx = W - PR - 54 * dpr, ly = PT + 6 * dpr;
+  legend.forEach(([label, color]) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly - 1 * dpr, 12 * dpr, 2.5 * dpr);
+    ctx.fillStyle = 'rgba(200,210,220,0.8)';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, lx + 15 * dpr, ly);
+    ly += 11 * dpr;
+  });
+}
+
+// ── Theta Decay Chart ─────────────────────────────────────────────────────────
+function drawDecayChart(canvas, S, K, r, sigma, T) {
+  const ctx = canvas.getContext('2d');
+  const dpr = devicePixelRatio;
+  const W   = canvas.width  = canvas.offsetWidth * dpr;
+  const H   = canvas.height = 200 * dpr;
+  ctx.clearRect(0, 0, W, H);
+
+  const PL = 12 * dpr, PR = 12 * dpr, PT = 10 * dpr, PB = 18 * dpr;
+  const pw = W - PL - PR, ph = H - PT - PB;
+
+  const N_PTS = 100, tMin = 0.002;
+  // Left = now (T), right = expiry (tMin)
+  const times = Array.from({ length: N_PTS }, (_, i) => T - (T - tMin) * i / (N_PTS - 1));
+
+  const callPrices = times.map(t => bsCalc(S, K, r, sigma, t, 'call').price);
+  const putPrices  = times.map(t => bsCalc(S, K, r, sigma, t, 'put').price);
+  const intrCall   = Math.max(S - K, 0);
+  const intrPut    = Math.max(K - S, 0);
+
+  const maxY = Math.max(...callPrices, ...putPrices) * 1.05 || 1;
+  const minY = 0;
+
+  const px = t  => PL + (T - t)  / (T - tMin) * pw;   // T→left, 0→right
+  const py = v  => PT + (1 - (v - minY) / (maxY - minY)) * ph;
+
+  // Intrinsic value reference lines
+  function hLine(v, color, label) {
+    if (v < 0.001) return;
+    const y = py(v);
+    ctx.save();
+    ctx.strokeStyle = color; ctx.lineWidth = 1 * dpr;
+    ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.font = `${8 * dpr}px sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(label, PL + 3 * dpr, y - 1 * dpr);
+    ctx.restore();
+  }
+  hLine(intrCall, 'rgba(88,166,255,0.35)',  'call intrinsic');
+  hLine(intrPut,  'rgba(248,81,73,0.35)',   'put intrinsic');
+
+  // Price lines
+  function drawLine(prices, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    times.forEach((t, i) => i === 0 ? ctx.moveTo(px(t), py(prices[i])) : ctx.lineTo(px(t), py(prices[i])));
+    ctx.stroke();
+  }
+  drawLine(callPrices, 'rgba(88,166,255,0.9)');
+  drawLine(putPrices,  'rgba(248,81,73,0.9)');
+
+  // X axis labels
+  ctx.font = `${8 * dpr}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.6)';
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';  ctx.fillText(`T=${T.toFixed(2)}y`, PL, H - 3 * dpr);
+  ctx.textAlign = 'right'; ctx.fillText('Expiry', W - PR, H - 3 * dpr);
+
+  // Legend (top-right)
+  const legend = [['Call', 'rgba(88,166,255,0.9)'], ['Put', 'rgba(248,81,73,0.9)']];
+  ctx.font = `${8 * dpr}px sans-serif`; ctx.textBaseline = 'middle';
+  let lx = W - PR - 44 * dpr, ly = PT + 8 * dpr;
+  legend.forEach(([label, color]) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly - 1 * dpr, 12 * dpr, 2.5 * dpr);
+    ctx.fillStyle = 'rgba(200,210,220,0.8)';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, lx + 15 * dpr, ly);
+    ly += 11 * dpr;
+  });
+}
+
 // ── Heatmap ───────────────────────────────────────────────────────────────────
 function fmtExpiry(T) {
   if (T >= 1) return (Number.isInteger(T) ? T : T.toFixed(1)) + 'Y';
@@ -1372,13 +1546,26 @@ function fmtExpiry(T) {
 
 // BS formula in JS — used only for the heatmap grid (display, not pricing)
 function bsCalc(S, K, r, sigma, T, type) {
+  if (T < 1e-6 || sigma < 1e-8 || S <= 0) {
+    const price = type === 'call' ? Math.max(S - K, 0) : Math.max(K - S, 0);
+    return { price, delta: type === 'call' ? (S > K ? 1 : 0) : (S < K ? -1 : 0),
+             gamma: 0, vega: 0, theta: 0 };
+  }
   const sqrtT = Math.sqrt(T);
-  const d1  = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
-  const d2  = d1 - sigma * sqrtT;
-  const Ke  = K * Math.exp(-r * T);
-  return type === 'call'
-    ? { price: S * normCDF(d1) - Ke * normCDF(d2) }
-    : { price: Ke * normCDF(-d2) - S * normCDF(-d1) };
+  const d1    = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+  const d2    = d1 - sigma * sqrtT;
+  const Ke    = K * Math.exp(-r * T);
+  const npd1  = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
+  const price = type === 'call'
+    ? S * normCDF(d1) - Ke * normCDF(d2)
+    : Ke * normCDF(-d2) - S * normCDF(-d1);
+  const delta = type === 'call' ? normCDF(d1) : normCDF(d1) - 1;
+  const gamma = npd1 / (S * sigma * sqrtT);
+  const vega  = S * npd1 * sqrtT / 100;           // per 1% vol move
+  const theta = type === 'call'
+    ? (-S * npd1 * sigma / (2 * sqrtT) - r * Ke * normCDF(d2))  / 365
+    : (-S * npd1 * sigma / (2 * sqrtT) + r * Ke * normCDF(-d2)) / 365;
+  return { price, delta, gamma, vega, theta };
 }
 
 // Colour helpers
@@ -1666,6 +1853,10 @@ window.addEventListener('resize', () => {
   if (lastResults) {
     drawPaths(document.getElementById('path-canvas'), lastResults.paths, lastResults.S, lastResults.K);
     drawConvergence(document.getElementById('conv-canvas'), lastResults.series, lastResults.bs.price);
+    drawGreeksChart(document.getElementById('greeks-canvas'),
+      lastResults.S, lastResults.K, lastResults.r, lastResults.sigma, lastResults.T, optionType);
+    drawDecayChart(document.getElementById('decay-canvas'),
+      lastResults.S, lastResults.K, lastResults.r, lastResults.sigma, lastResults.T);
   }
   if (heatmapGenerated) computeHeatmaps();
 });
