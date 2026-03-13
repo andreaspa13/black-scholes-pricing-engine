@@ -704,15 +704,20 @@
   <div class="iv-controls">
     <div class="iv-input-group">
       <label>
-        Market price
-        <span class="info" data-tip="<b>Market Price</b><br>The price you observed in the market for this option. The solver finds the volatility σ such that BS(σ) exactly equals this price.<br><br>Must be above intrinsic value and below the theoretical upper bound (S for calls, K·e⁻ʳᵀ for puts).">i</span>
+        Bid / Ask
+        <span class="info" data-tip="<b>Bid / Ask</b><br>Enter the bid and ask prices from your broker or data source (e.g. Yahoo Finance, CBOE). The mid-price (bid+ask)/2 is used as the market price for the IV calculation.<br><br>Must be above intrinsic value and below the theoretical upper bound (S for calls, K·e⁻ʳᵀ for puts).">i</span>
       </label>
-      <input type="number" class="iv-input" id="iv-market-price" placeholder="e.g. 10.45" min="0" step="0.01">
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="number" class="iv-input" id="iv-bid" placeholder="Bid" min="0" step="0.01" oninput="updateIVMid()">
+        <span style="color:var(--muted);font-size:13px">/</span>
+        <input type="number" class="iv-input" id="iv-ask" placeholder="Ask" min="0" step="0.01" oninput="updateIVMid()">
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">Mid: <span id="iv-mid-display" style="font-family:monospace">—</span></div>
     </div>
     <button class="iv-btn" id="iv-btn" onclick="computeIV()">Solve IV</button>
   </div>
   <div id="iv-output" style="min-height:52px">
-    <div class="iv-meta" style="color:var(--muted)">Enter a market price above and click Solve IV. S, K, r, T are taken from the main panel.</div>
+    <div class="iv-meta" style="color:var(--muted)">Enter bid and ask above and click Solve IV. S, K, r, T are taken from the main panel.</div>
   </div>
 </div>
 
@@ -1275,13 +1280,27 @@ document.getElementById('explain-overlay').addEventListener('click', e => {
 document.addEventListener('keydown', e => { if (e.key==='Escape') closeExplain(); });
 
 // ── Implied Volatility ────────────────────────────────────────────────────────
+function updateIVMid() {
+  const bid = parseFloat(document.getElementById('iv-bid').value);
+  const ask = parseFloat(document.getElementById('iv-ask').value);
+  const mid = (!isNaN(bid) && !isNaN(ask)) ? (bid + ask) / 2 : null;
+  document.getElementById('iv-mid-display').textContent = mid !== null ? mid.toFixed(3) : '—';
+}
+
 async function computeIV() {
-  const marketPrice = parseFloat(document.getElementById('iv-market-price').value);
-  if (isNaN(marketPrice) || marketPrice <= 0) {
+  const bid = parseFloat(document.getElementById('iv-bid').value);
+  const ask = parseFloat(document.getElementById('iv-ask').value);
+  if (isNaN(bid) || isNaN(ask) || bid <= 0 || ask <= 0) {
     document.getElementById('iv-output').innerHTML =
-      '<div class="iv-error">Enter a positive market price.</div>';
+      '<div class="iv-error">Enter valid bid and ask prices.</div>';
     return;
   }
+  if (ask < bid) {
+    document.getElementById('iv-output').innerHTML =
+      '<div class="iv-error">Ask must be ≥ bid.</div>';
+    return;
+  }
+  const marketPrice = (bid + ask) / 2;
 
   const btn = document.getElementById('iv-btn');
   btn.disabled = true; btn.textContent = 'Solving…';
@@ -1338,7 +1357,7 @@ async function computeIV() {
         <div style="font-size:16px;font-family:monospace;color:var(--text-dim)">${bsPrice}</div>
       </div>
       <div>
-        <div class="metric-label" style="margin-bottom:4px">Price diff (mkt − BS)</div>
+        <div class="metric-label" style="margin-bottom:4px">Price diff (mid − BS)</div>
         <div style="font-size:16px;font-family:monospace;color:${diffVal>=0?'var(--accent2)':'var(--warn)'}">${diffVal>=0?'+':''}${diff}</div>
       </div>` : ''}
     </div>
