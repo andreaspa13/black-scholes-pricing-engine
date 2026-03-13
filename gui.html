@@ -158,6 +158,13 @@
   }
   .atm-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+  .currency-select {
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text-dim); font-size: 11px; border-radius: 4px;
+    padding: 2px 5px; cursor: pointer; outline: none;
+  }
+  .currency-select option { background: #161b22; }
+
   .mc-config { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 
   /* ── Right column ── */
@@ -405,7 +412,16 @@
   <!-- ── Left: controls ── -->
   <div>
     <div class="panel">
-      <div class="panel-title">Parameters</div>
+      <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between">
+        Parameters
+        <select id="currency-select" class="currency-select" onchange="setCurrency(this.value)">
+          <option value="$"  selected>$ USD</option>
+          <option value="€">€ EUR</option>
+          <option value="£">£ GBP</option>
+          <option value="¥">¥ JPY</option>
+          <option value="Fr">Fr CHF</option>
+        </select>
+      </div>
 
       <!-- Call / Put -->
       <div class="toggle-row">
@@ -424,6 +440,7 @@
             <input type="number" id="S" value="100" min="0.01" step="1" onblur="clamp('S')">
             <button title="+1  (Shift: +5)" onclick="step('S',1,event)">+</button>
           </div>
+          <span class="stepper-unit ccy-unit">$</span>
         </div>
       </div>
 
@@ -435,6 +452,7 @@
             <input type="number" id="K" value="100" min="0.01" step="1" onblur="clamp('K')">
             <button title="Step: ±1 (S&lt;50) · ±5 (S 50–200) · ±10 (S 200+)" onclick="stepK(1,event)">+</button>
           </div>
+          <span class="stepper-unit ccy-unit">$</span>
         </div>
         <button class="atm-btn" onclick="resetATM()" title="Set K = S (at-the-money)">≈ ATM</button>
       </div>
@@ -801,6 +819,29 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 let optionType = 'call';
 let lastResults = null;
+let currencySymbol = '$';
+function sym() { return currencySymbol; }
+
+function setCurrency(s) {
+  currencySymbol = s;
+  document.querySelectorAll('.ccy-unit').forEach(el => el.textContent = s);
+  if (!lastResults) return;
+  const bs = (optionType === lastResults.pricedType) ? lastResults.bs : lastResults.bsOther;
+  const mc = (optionType === lastResults.pricedType) ? lastResults.mc : lastResults.mcOther;
+  document.getElementById('bs-price').textContent = s + bs.price.toFixed(6);
+  document.getElementById('mc-price').textContent  = s + mc.price.toFixed(6);
+  document.getElementById('mc-stderr').textContent = s + mc.stdErr.toFixed(6);
+  const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
+  const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
+  document.getElementById('mc-ci').textContent = `[${s}${lo}, ${s}${hi}]`;
+  const { bsCall, bsPut, S, K, r, T } = lastResults;
+  const cMinP = bsCall - bsPut, theory = S - K * Math.exp(-r * T);
+  document.getElementById('par-diff').textContent   = s + cMinP.toFixed(8);
+  document.getElementById('par-theory').textContent = s + theory.toFixed(8);
+  document.getElementById('par-err').textContent    = s + Math.abs(cMinP - theory).toExponential(2);
+  const series = (optionType === lastResults.pricedType) ? lastResults.series : lastResults.seriesOther;
+  drawConvergence(document.getElementById('conv-canvas'), series, bs.price);
+}
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 const tip = document.getElementById('tip');
@@ -888,7 +929,7 @@ function setType(t) {
     // Pick the stored result that matches the newly selected type
     const bs = (t === lastResults.pricedType) ? lastResults.bs : lastResults.bsOther;
 
-    document.getElementById('bs-price').textContent = bs.price.toFixed(6);
+    document.getElementById('bs-price').textContent = sym() + bs.price.toFixed(6);
     document.getElementById('bs-price').className   = 'metric-value ' + col;
     document.getElementById('bs-delta').textContent = bs.delta.toFixed(6);
     document.getElementById('bs-d1').textContent    = bs.d1.toFixed(4);
@@ -901,12 +942,12 @@ function setType(t) {
     // Swap MC card
     const mc = (t === lastResults.pricedType) ? lastResults.mc : lastResults.mcOther;
     const bsForType = bs; // already selected above
-    document.getElementById('mc-price').textContent  = mc.price.toFixed(6);
+    document.getElementById('mc-price').textContent  = sym() + mc.price.toFixed(6);
     document.getElementById('mc-price').className    = 'metric-value ' + col;
-    document.getElementById('mc-stderr').textContent = mc.stdErr.toFixed(6);
+    document.getElementById('mc-stderr').textContent = sym() + mc.stdErr.toFixed(6);
     const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
     const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
-    document.getElementById('mc-ci').textContent = `[${lo}, ${hi}]`;
+    document.getElementById('mc-ci').textContent = `[${sym()}${lo}, ${sym()}${hi}]`;
     const devs = Math.abs(mc.price - bsForType.price) / mc.stdErr;
     const avActive = lastResults.series !== lastResults.seriesOther ? false
                    : document.getElementById('use-antithetic').checked;
@@ -997,10 +1038,10 @@ function drawConvergence(canvas, series, bsPrice) {
   // Labels
   ctx.font=`${9*devicePixelRatio}px monospace`;
   ctx.fillStyle='rgba(88,166,255,0.8)';
-  ctx.fillText('BS '+bsPrice.toFixed(4),14*devicePixelRatio,py(bsPrice)-5*devicePixelRatio);
+  ctx.fillText('BS '+sym()+bsPrice.toFixed(4),14*devicePixelRatio,py(bsPrice)-5*devicePixelRatio);
   const last=series[series.length-1];
   ctx.fillStyle='rgba(63,185,80,0.8)';
-  ctx.fillText('MC '+last.price.toFixed(4),px(last.n)-58*devicePixelRatio,py(last.price)-5*devicePixelRatio);
+  ctx.fillText('MC '+sym()+last.price.toFixed(4),px(last.n)-64*devicePixelRatio,py(last.price)-5*devicePixelRatio);
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
@@ -1046,7 +1087,7 @@ async function runAll() {
   const bsCall  = optionType === 'call' ? bs.price : bsOther.price;
   const bsPut   = optionType === 'put'  ? bs.price : bsOther.price;
 
-  document.getElementById('bs-price').textContent = bs.price.toFixed(6);
+  document.getElementById('bs-price').textContent = sym() + bs.price.toFixed(6);
   document.getElementById('bs-price').className   = 'metric-value ' + col;
   document.getElementById('bs-delta').textContent = bs.delta.toFixed(6);
   document.getElementById('bs-d1').textContent    = bs.d1.toFixed(4);
@@ -1062,12 +1103,12 @@ async function runAll() {
   document.getElementById('conv-title').textContent =
     avActive ? 'MC+AV Convergence to BS Price' : 'MC Convergence to BS Price';
 
-  document.getElementById('mc-price').textContent  = mc.price.toFixed(6);
+  document.getElementById('mc-price').textContent  = sym() + mc.price.toFixed(6);
   document.getElementById('mc-price').className    = 'metric-value ' + col;
-  document.getElementById('mc-stderr').textContent = mc.stdErr.toFixed(6);
+  document.getElementById('mc-stderr').textContent = sym() + mc.stdErr.toFixed(6);
   const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
   const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
-  document.getElementById('mc-ci').textContent = `[${lo}, ${hi}]`;
+  document.getElementById('mc-ci').textContent = `[${sym()}${lo}, ${sym()}${hi}]`;
   const devs = Math.abs(mc.price - bs.price) / mc.stdErr;
   const avTag = avActive ? ' (AV)' : '';
   document.getElementById('mc-status').textContent = `MC${avTag} within ${devs.toFixed(2)}σ of BS price`;
@@ -1075,9 +1116,9 @@ async function runAll() {
   // Parity
   const parBar = document.getElementById('parity-bar'); parBar.style.display = 'flex';
   const cMinP = bsCall - bsPut, theory = S - K * Math.exp(-r * T), err = Math.abs(cMinP - theory);
-  document.getElementById('par-diff').textContent   = cMinP.toFixed(8);
-  document.getElementById('par-theory').textContent = theory.toFixed(8);
-  document.getElementById('par-err').textContent    = err.toExponential(2);
+  document.getElementById('par-diff').textContent   = sym() + cMinP.toFixed(8);
+  document.getElementById('par-theory').textContent = sym() + theory.toFixed(8);
+  document.getElementById('par-err').textContent    = sym() + err.toExponential(2);
   const st = document.getElementById('par-status');
   err < 1e-8 ? (st.textContent = 'Parity holds', st.className = 'parity-status ok')
              : (st.textContent = 'Parity error!', st.className = 'parity-status bad');
@@ -1116,7 +1157,7 @@ function showExplain() {
     ? 'in-the-money (ITM)' : 'out-of-the-money (OTM)';
 
   const moneyDesc = intrinsic > 0
-    ? `The stock is already past the strike - if the option expired today, it would pay out <span class="hl-num">£${intrinsic.toFixed(2)}</span> (its intrinsic value).`
+    ? `The stock is already past the strike - if the option expired today, it would pay out <span class="hl-num">${sym()}${intrinsic.toFixed(2)}</span> (its intrinsic value).`
     : intrinsic < 0
     ? `The stock hasn't reached the strike yet. The option has no intrinsic value right now - it's worth something only because there's still time for the stock to move.`
     : `The stock is right at the strike. Small moves in either direction will push it in or out of the money.`;
@@ -1150,17 +1191,17 @@ function showExplain() {
     <div class="explain-section">
       <h3>The Contract</h3>
       <p>You are pricing a <span class="hl-${col}">${T >= 1 ? T.toFixed(0)+'-year' : Math.round(T*12)+'-month'} European ${type}</span> option.
-      The underlying stock trades at <span class="hl-num">£${S.toFixed(2)}</span> today, and the contract gives you the right to
-      <b>${type==='call'?'buy':'sell'}</b> it at <span class="hl-num">£${K.toFixed(2)}</span> on the expiry date.</p>
+      The underlying stock trades at <span class="hl-num">${sym()}${S.toFixed(2)}</span> today, and the contract gives you the right to
+      <b>${type==='call'?'buy':'sell'}</b> it at <span class="hl-num">${sym()}${K.toFixed(2)}</span> on the expiry date.</p>
       <p>This option is currently <b>${moneynessLabel}</b>. ${moneyDesc}</p>
     </div>
 
     <div class="explain-section">
       <h3>Fair Price</h3>
-      <p>Black-Scholes calculates the fair price as <span class="hl-num">£${bs.price.toFixed(4)}</span>.
+      <p>Black-Scholes calculates the fair price as <span class="hl-num">${sym()}${bs.price.toFixed(4)}</span>.
       This is what you should pay for the contract today.</p>
-      <p>Of that total, <span class="hl-num">£${Math.max(intrinsic,0).toFixed(4)}</span> is <b>intrinsic value</b>
-      (what it would pay if it expired right now) and <span class="hl-num">£${timeValue}</span> is <b>time value</b>
+      <p>Of that total, <span class="hl-num">${sym()}${Math.max(intrinsic,0).toFixed(4)}</span> is <b>intrinsic value</b>
+      (what it would pay if it expired right now) and <span class="hl-num">${sym()}${timeValue}</span> is <b>time value</b>
       - the extra premium you pay for the possibility the stock moves further in your favour before expiry.</p>
     </div>
 
@@ -1170,15 +1211,15 @@ function showExplain() {
       roughly <span class="hl-num">±${annualMove}%</span> over the life of this contract.
       The model-implied probability that the option expires in the money is approximately <span class="hl-green">${probPct}%</span>.</p>
       <p>The risk-free rate is <span class="hl-num">${(r*100).toFixed(2)}%</span>.
-      This means £1 invested risk-free today grows to <span class="hl-num">£${Math.exp(r*T).toFixed(4)}</span> by expiry -
+      This means ${sym()}1 invested risk-free today grows to <span class="hl-num">${sym()}${Math.exp(r*T).toFixed(4)}</span> by expiry -
       that growth is factored into the option price.</p>
     </div>
 
     <div class="explain-section">
       <h3>Delta - Hedging Sensitivity</h3>
       <p>Delta is <span class="hl-num">${bs.delta.toFixed(4)}</span>, meaning the option is <b>${deltaDesc}</b>.
-      For every <span class="hl-num">£1</span> the stock moves ${type==='call'?'up':'down'},
-      this option gains approximately <span class="hl-num">£${absDelta.toFixed(2)}</span> in value.</p>
+      For every <span class="hl-num">${sym()}1</span> the stock moves ${type==='call'?'up':'down'},
+      this option gains approximately <span class="hl-num">${sym()}${absDelta.toFixed(2)}</span> in value.</p>
       <p>A trader holding this option and wanting no net exposure to stock moves would
       ${type==='call'?`sell <span class="hl-num">${absDelta.toFixed(2)} shares</span> of stock for every option held`
                      :`buy <span class="hl-num">${absDelta.toFixed(2)} shares</span> of stock for every option held`}
@@ -1187,17 +1228,17 @@ function showExplain() {
 
     <div class="explain-section">
       <h3>Greeks</h3>
-      <p><b>Gamma (${bs.gamma.toFixed(4)})</b> — Delta itself changes at this rate per £1 move in the stock.
-      ${type==='call'?'A £1 rise':'A £1 fall'} in the stock price increases delta by <span class="hl-num">${bs.gamma.toFixed(4)}</span>.
+      <p><b>Gamma (${bs.gamma.toFixed(4)})</b> — Delta itself changes at this rate per ${sym()}1 move in the stock.
+      ${type==='call'?`A ${sym()}1 rise`:`A ${sym()}1 fall`} in the stock price increases delta by <span class="hl-num">${bs.gamma.toFixed(4)}</span>.
       Gamma is highest for at-the-money options close to expiry, where small moves can swing the delta dramatically.</p>
       <p><b>Vega (${bs.vega.toFixed(4)})</b> — A 1 percentage-point rise in implied volatility adds
-      <span class="hl-num">£${(bs.vega/100).toFixed(4)}</span> to the option price.
+      <span class="hl-num">${sym()}${(bs.vega/100).toFixed(4)}</span> to the option price.
       Vega is always positive — greater uncertainty always makes options more valuable.</p>
       <p><b>Theta (${bs.theta.toFixed(4)})</b> — Each calendar day that passes costs the holder
-      <span class="hl-num">£${Math.abs(bs.theta).toFixed(4)}</span> in time value, all else equal.
+      <span class="hl-num">${sym()}${Math.abs(bs.theta).toFixed(4)}</span> in time value, all else equal.
       This decay accelerates as expiry approaches.</p>
       <p><b>Rho (${bs.rho.toFixed(4)})</b> — A 1 percentage-point rise in the risk-free rate
-      ${bs.rho >= 0 ? 'adds' : 'removes'} <span class="hl-num">£${(Math.abs(bs.rho)/100).toFixed(4)}</span> to the option price.
+      ${bs.rho >= 0 ? 'adds' : 'removes'} <span class="hl-num">${sym()}${(Math.abs(bs.rho)/100).toFixed(4)}</span> to the option price.
       ${type==='call'?'Calls benefit from higher rates (money earns more while you wait)':'Puts are hurt by higher rates (the discounted strike is worth less)'}.
       </p>
     </div>
@@ -1205,19 +1246,19 @@ function showExplain() {
     <div class="explain-section">
       <h3>Monte Carlo Validation</h3>
       <p>Running <span class="hl-num">${niceN}</span> simulated futures gives a price of
-      <span class="hl-num">£${mc.price.toFixed(4)}</span> with a standard error of <span class="hl-num">£${mc.stdErr.toFixed(4)}</span>.
+      <span class="hl-num">${sym()}${mc.price.toFixed(4)}</span> with a standard error of <span class="hl-num">${sym()}${mc.stdErr.toFixed(4)}</span>.
       The MC result is <span class="hl-num">${devs.toFixed(2)} standard deviations</span> from the BS price - <span class="hl-green">${mcQuality}</span>.</p>
-      <p>The 95% confidence interval <span class="hl-num">[£${(mc.price-1.96*mc.stdErr).toFixed(4)}, £${(mc.price+1.96*mc.stdErr).toFixed(4)}]</span>
+      <p>The 95% confidence interval <span class="hl-num">[${sym()}${(mc.price-1.96*mc.stdErr).toFixed(4)}, ${sym()}${(mc.price+1.96*mc.stdErr).toFixed(4)}]</span>
       ${Math.abs(mc.price-bs.price) < 1.96*mc.stdErr ? '<span class="hl-green">contains</span>' : '<span style="color:var(--warn)">does not contain</span>'}
       the BS price, which is ${Math.abs(mc.price-bs.price) < 1.96*mc.stdErr ? 'expected' : 'unusual - try more paths'} at this path count.</p>
     </div>
 
     <div class="explain-section">
       <h3>Put-Call Parity</h3>
-      <p>A matching call is worth <span class="hl-num">£${bsCall.toFixed(4)}</span> and a matching put is worth
-      <span class="hl-num">£${bsPut.toFixed(4)}</span>. Their difference -
-      <span class="hl-num">£${(bsCall-bsPut).toFixed(6)}</span> - equals
-      S − K·e<sup>−rT</sup> = <span class="hl-num">£${(S-K*Math.exp(-r*T)).toFixed(6)}</span> to machine precision.
+      <p>A matching call is worth <span class="hl-num">${sym()}${bsCall.toFixed(4)}</span> and a matching put is worth
+      <span class="hl-num">${sym()}${bsPut.toFixed(4)}</span>. Their difference -
+      <span class="hl-num">${sym()}${(bsCall-bsPut).toFixed(6)}</span> - equals
+      S − K·e<sup>−rT</sup> = <span class="hl-num">${sym()}${(S-K*Math.exp(-r*T)).toFixed(6)}</span> to machine precision.
       This confirms the implementation is internally consistent: there is no arbitrage opportunity.</p>
     </div>
   `;
@@ -1277,8 +1318,9 @@ async function computeIV() {
 
   const ivPct = (data.iv * 100).toFixed(4);
   // Show how far the BS price (at current σ from main panel) is from the market price
-  const bsPrice = lastResults ? lastResults.bs.price.toFixed(4) : '—';
-  const diff = lastResults ? (marketPrice - lastResults.bs.price).toFixed(4) : '—';
+  const bsPrice = lastResults ? sym() + lastResults.bs.price.toFixed(4) : '—';
+  const diffVal = lastResults ? (marketPrice - lastResults.bs.price) : null;
+  const diff    = diffVal !== null ? sym() + diffVal.toFixed(4) : '—';
 
   document.getElementById('iv-output').innerHTML = `
     <div class="iv-result">
@@ -1297,7 +1339,7 @@ async function computeIV() {
       </div>
       <div>
         <div class="metric-label" style="margin-bottom:4px">Price diff (mkt − BS)</div>
-        <div style="font-size:16px;font-family:monospace;color:${parseFloat(diff)>=0?'var(--accent2)':'var(--warn)'}">${parseFloat(diff)>=0?'+':''}${diff}</div>
+        <div style="font-size:16px;font-family:monospace;color:${diffVal>=0?'var(--accent2)':'var(--warn)'}">${diffVal>=0?'+':''}${diff}</div>
       </div>` : ''}
     </div>
     <div class="iv-method">${data.message}</div>
