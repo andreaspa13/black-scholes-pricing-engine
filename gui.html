@@ -545,7 +545,7 @@
       <div class="result-card">
         <div class="model-label">
           <span class="dot"></span> Black-Scholes
-          <span class="info" style="margin-left:2px" data-tip="<b>Black-Scholes Model</b><br>A closed-form mathematical formula (1973) that calculates the exact fair price instantly. No randomness - you put in the numbers and get the answer directly.<br><br>It assumes constant volatility, no dividends, and that the stock follows a specific random process (geometric Brownian motion). The result is exact under these assumptions.">i</span>
+          <span class="info" style="margin-left:2px" data-tip="<b>Black-Scholes Model</b><br>A closed-form mathematical formula (1973) that calculates the exact fair price instantly. No randomness - you put in the numbers and get the answer directly.<br><br>It assumes constant volatility, no dividends, and that the stock follows a specific random process (geometric Brownian motion). The result is exact under these assumptions.<br><br><b>The Formula</b><br><span style='font-family:monospace;font-size:11px'>d₁ = [ln(S/K) + (r + σ²/2)·T] / (σ√T)<br>d₂ = d₁ − σ√T<br><br>Call = S·N(d₁) − K·e<sup>−rT</sup>·N(d₂)<br>Put &nbsp;= K·e<sup>−rT</sup>·N(−d₂) − S·N(−d₁)</span><br><br>N(·) is the standard normal CDF. The formula prices the option as the discounted expected payoff under the risk-neutral measure.">i</span>
         </div>
         <div class="metric">
           <div class="metric-label">
@@ -557,7 +557,7 @@
         <div class="metric-row">
           <div class="metric-small">
             <div class="metric-label">
-              Delta
+              Δ, Delta
               <span class="info" data-tip="<b>Delta (Δ)</b><br>How much the option's price changes when the stock moves by £1.<br><br>A delta of 0.64 means: stock goes up £1 → option gains ~£0.64. Traders use delta to hedge - to buy or sell the right amount of stock to cancel out their option exposure.<br><br>Call delta: 0 to 1. Put delta: −1 to 0. At-the-money ≈ ±0.5.">i</span>
             </div>
             <div class="metric-value metric-small" id="bs-delta">-</div>
@@ -580,28 +580,28 @@
         <div class="metric-row">
           <div class="metric-small">
             <div class="metric-label">
-              Gamma
+              Γ, Gamma
               <span class="info" data-tip="<b>Gamma (Γ)</b><br>The rate of change of Delta as the stock price moves. How much delta shifts when the stock moves £1.<br><br>A gamma of 0.03 means: stock goes up £1 → delta increases by 0.03. High gamma = delta changes fast. Gamma is highest for at-the-money options near expiry.">i</span>
             </div>
             <div class="metric-value metric-small" id="bs-gamma">-</div>
           </div>
           <div class="metric-small">
             <div class="metric-label">
-              Vega
+              ν, Vega
               <span class="info" data-tip="<b>Vega (ν)</b><br>How much the option's price changes when implied volatility moves by 1 percentage point (1%).<br><br>A vega of 0.38 means: volatility rises 1% → option gains £0.38. Vega is always positive — higher vol always makes options more valuable because it widens the range of possible outcomes.">i</span>
             </div>
             <div class="metric-value metric-small" id="bs-vega">-</div>
           </div>
           <div class="metric-small">
             <div class="metric-label">
-              Theta
+              Θ, Theta
               <span class="info" data-tip="<b>Theta (Θ)</b><br>The option's time decay — how much value it loses per calendar day, all else equal.<br><br>A theta of −0.03 means: one day passes → option loses £0.03. This is negative for long options (you own an asset that decays). Decay accelerates as expiry approaches.">i</span>
             </div>
             <div class="metric-value metric-small" id="bs-theta">-</div>
           </div>
           <div class="metric-small">
             <div class="metric-label">
-              Rho
+              ρ, Rho
               <span class="info" data-tip="<b>Rho (ρ)</b><br>How much the option's price changes when the risk-free interest rate moves by 1 percentage point (1%).<br><br>A rho of 0.45 means: rates rise 1% → option gains £0.45. Calls benefit from higher rates (holding the option instead of the stock earns more interest); puts are hurt.">i</span>
             </div>
             <div class="metric-value metric-small" id="bs-rho">-</div>
