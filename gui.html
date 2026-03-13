@@ -150,6 +150,14 @@
     font-size: 10px; font-weight: 700;
   }
 
+  .atm-btn {
+    margin-top: 5px; padding: 3px 10px; background: none;
+    border: 1px solid var(--border); border-radius: 5px;
+    color: var(--muted); font-size: 11px; cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .atm-btn:hover { border-color: var(--accent); color: var(--accent); }
+
   .mc-config { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 
   /* ── Right column ── */
@@ -412,9 +420,9 @@
         <label>Spot price S <span class="info" data-tip="<b>Spot Price (S)</b><br>The current market price of the underlying stock - what you'd pay to buy it right now.<br><br>A higher spot price makes calls more valuable (closer to or past the strike) and puts less valuable.">i</span></label>
         <div class="stepper-row">
           <div class="stepper" style="flex:1">
-            <button onclick="step('S',-1)">−</button>
+            <button title="−1  (Shift: −5)" onclick="step('S',-1,event)">−</button>
             <input type="number" id="S" value="100" min="0.01" step="1" onblur="clamp('S')">
-            <button onclick="step('S',1)">+</button>
+            <button title="+1  (Shift: +5)" onclick="step('S',1,event)">+</button>
           </div>
         </div>
       </div>
@@ -423,11 +431,12 @@
         <label>Strike K <span class="info" data-tip="<b>Strike Price (K)</b><br>The price locked in by the contract - you can buy (call) or sell (put) the stock at exactly this price on expiry day, regardless of where the market is.<br><br>If S > K, a call is <em>in the money</em> (already profitable). If S < K, it's <em>out of the money</em>.">i</span></label>
         <div class="stepper-row">
           <div class="stepper" style="flex:1">
-            <button onclick="step('K',-1)">−</button>
+            <button title="Step: ±1 (S&lt;50) · ±5 (S 50–200) · ±10 (S 200+)" onclick="stepK(-1,event)">−</button>
             <input type="number" id="K" value="100" min="0.01" step="1" onblur="clamp('K')">
-            <button onclick="step('K',1)">+</button>
+            <button title="Step: ±1 (S&lt;50) · ±5 (S 50–200) · ±10 (S 200+)" onclick="stepK(1,event)">+</button>
           </div>
         </div>
+        <button class="atm-btn" onclick="resetATM()" title="Set K = S (at-the-money)">≈ ATM</button>
       </div>
 
       <div class="input-group">
@@ -446,9 +455,9 @@
         <label>Volatility σ <span class="info" data-tip="<b>Volatility (σ)</b><br>How wildly the stock tends to swing, expressed as an annual percentage. At 20%, the stock is expected to move roughly ±20% over a year.<br><br><b>Higher vol = more expensive options</b> - because there's a greater chance the stock makes a large move in your favour. This is the most sensitive input in the model.">i</span></label>
         <div class="stepper-row">
           <div class="stepper" style="flex:1">
-            <button onclick="step('sigma',-0.5)">−</button>
-            <input type="number" id="sigma" value="20" min="0.1" max="200" step="0.5" onblur="clamp('sigma')">
-            <button onclick="step('sigma',0.5)">+</button>
+            <button onclick="step('sigma',-1)">−</button>
+            <input type="number" id="sigma" value="20" min="0.1" max="200" step="1" onblur="clamp('sigma')">
+            <button onclick="step('sigma',1)">+</button>
           </div>
           <span class="stepper-unit">%</span>
         </div>
@@ -475,9 +484,9 @@
         <div class="input-group">
           <label>Paths N <span class="info" data-tip="<b>Number of Paths (N)</b><br>How many random futures to simulate. Each path is one possible stock price journey from today to expiry.<br><br>More paths = more accurate estimate, but takes longer. The error shrinks as 1/√N - so quadrupling paths halves the error. Watch the convergence chart to see this in action.">i</span></label>
           <div class="stepper">
-            <button onclick="step('N',-500)">−</button>
-            <input type="number" id="N" value="10000" min="500" max="500000" step="500" onblur="clamp('N')">
-            <button onclick="step('N',500)">+</button>
+            <button onclick="step('N',-5000)">−</button>
+            <input type="number" id="N" value="10000" min="500" max="500000" step="5000" onblur="clamp('N')">
+            <button onclick="step('N',5000)">+</button>
           </div>
         </div>
 
@@ -832,9 +841,9 @@ const PARAMS = {
   S:     { min: 0.01, max: 9999,   step: 1,    dec: 2 },
   K:     { min: 0.01, max: 9999,   step: 1,    dec: 2 },
   r:     { min: 0,    max: 99,     step: 0.25, dec: 2 },
-  sigma: { min: 0.1,  max: 200,    step: 0.5,  dec: 2 },
+  sigma: { min: 0.1,  max: 200,    step: 1,    dec: 2 },
   T:     { min: 0.05, max: 30,     step: 0.05, dec: 2 },
-  N:     { min: 500,  max: 500000, step: 500,  dec: 0 },
+  N:     { min: 500,  max: 500000, step: 5000, dec: 0 },
   vis:   { min: 5,    max: 150,    step: 5,    dec: 0 },
 };
 
@@ -843,10 +852,23 @@ function getVal(id) {
   return isNaN(v) ? PARAMS[id].min : v;
 }
 
-function step(id, delta) {
+function step(id, delta, evt) {
+  if (id === 'S' && evt && evt.shiftKey) delta *= 5;
   const cfg = PARAMS[id], el = document.getElementById(id);
   const v = Math.max(cfg.min, Math.min(cfg.max, getVal(id) + delta));
   el.value = v.toFixed(cfg.dec);
+}
+
+// Strike uses exchange-standard ladders: ±1 (S<50), ±5 (50–200), ±10 (200+)
+function stepK(dir, evt) {
+  const S = getVal('S');
+  const s = S < 50 ? 1 : S < 200 ? 5 : 10;
+  step('K', dir * s, null);
+}
+
+// Snap K = S (at-the-money reset)
+function resetATM() {
+  document.getElementById('K').value = getVal('S').toFixed(PARAMS.K.dec);
 }
 
 function clamp(id) {
