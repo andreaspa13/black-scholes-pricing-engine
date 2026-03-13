@@ -898,8 +898,24 @@ function setType(t) {
     document.getElementById('bs-theta').textContent = bs.theta.toFixed(6);
     document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
 
-    // Keep MC colour in sync (MC was priced for the other type but the display colour should match)
-    document.getElementById('mc-price').className = 'metric-value ' + col;
+    // Swap MC card
+    const mc = (t === lastResults.pricedType) ? lastResults.mc : lastResults.mcOther;
+    const bsForType = bs; // already selected above
+    document.getElementById('mc-price').textContent  = mc.price.toFixed(6);
+    document.getElementById('mc-price').className    = 'metric-value ' + col;
+    document.getElementById('mc-stderr').textContent = mc.stdErr.toFixed(6);
+    const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
+    const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
+    document.getElementById('mc-ci').textContent = `[${lo}, ${hi}]`;
+    const devs = Math.abs(mc.price - bsForType.price) / mc.stdErr;
+    const avActive = lastResults.series !== lastResults.seriesOther ? false
+                   : document.getElementById('use-antithetic').checked;
+    const avTag = document.getElementById('use-antithetic').checked ? ' (AV)' : '';
+    document.getElementById('mc-status').textContent = `MC${avTag} within ${devs.toFixed(2)}σ of BS price`;
+
+    // Redraw convergence chart for the selected type
+    const series = (t === lastResults.pricedType) ? lastResults.series : lastResults.seriesOther;
+    drawConvergence(document.getElementById('conv-canvas'), series, bsForType.price);
   }
   ['bs-price','mc-price'].forEach(id => {
     const el = document.getElementById(id);
@@ -1023,10 +1039,12 @@ async function runAll() {
   }
   document.getElementById('server-error').style.display = 'none';
 
-  const bs = res.bs;
+  const bs      = res.bs;
   const bsOther = res.bsOther;
-  const bsCall = optionType === 'call' ? bs.price : bsOther.price;
-  const bsPut  = optionType === 'put'  ? bs.price : bsOther.price;
+  const mc      = res.mc;
+  const mcOther = res.mcOther;
+  const bsCall  = optionType === 'call' ? bs.price : bsOther.price;
+  const bsPut   = optionType === 'put'  ? bs.price : bsOther.price;
 
   document.getElementById('bs-price').textContent = bs.price.toFixed(6);
   document.getElementById('bs-price').className   = 'metric-value ' + col;
@@ -1038,7 +1056,6 @@ async function runAll() {
   document.getElementById('bs-theta').textContent = bs.theta.toFixed(6);
   document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
 
-  const mc = res.mc;
   const avActive = res.varReduction === 'antithetic';
   // Update toggle label and convergence chart title to reflect active technique
   document.getElementById('vr-label').textContent = avActive ? 'Antithetic variates' : 'Off';
@@ -1073,9 +1090,10 @@ async function runAll() {
   bs.N_d2 = normCDF(bs.d2);
 
   // Store for explanation and type-switching
-  lastResults = { S, K, r, sigma, T, N, bs, bsOther, bsCall, bsPut, mc, devs,
+  lastResults = { S, K, r, sigma, T, N, bs, bsOther, bsCall, bsPut, mc, mcOther, devs,
                   pricedType: optionType,
-                  series: res.convergence, paths: res.paths };
+                  series: res.convergence, seriesOther: res.convergenceOther,
+                  paths: res.paths };
 
   btn.disabled = false; btn.textContent = 'Run Pricing';
   document.getElementById('explain-btn').disabled = false;

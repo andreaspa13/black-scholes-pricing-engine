@@ -210,11 +210,12 @@ int main() {
                                              ? VarianceReduction::Antithetic
                                              : VarianceReduction::None;
             MonteCarloModel mc(numPaths, 1, 42, varRed);
-            const PricingResult mcRes = mc.price(opt, market);
+            const PricingResult mcRes      = mc.price(opt,      market);
+            const PricingResult mcOtherRes = mc.price(optOther, market);
 
-            // ── Convergence series ─────────────────────────────────────────
-            const auto conv = buildConvergenceSeries(S, K, r, sigma, T, otype,
-                                                     numPaths, useAntithetic);
+            // ── Convergence series (both types) ────────────────────────────
+            const auto conv      = buildConvergenceSeries(S, K, r, sigma, T, otype,  numPaths, useAntithetic);
+            const auto convOther = buildConvergenceSeries(S, K, r, sigma, T, oOther, numPaths, useAntithetic);
 
             // ── Visual GBM paths ───────────────────────────────────────────
             std::mt19937 visRng(99);  // different seed from MC so paths look varied
@@ -228,6 +229,10 @@ int main() {
             json convJson = json::array();
             for (const auto& cp : conv)
                 convJson.push_back({ {"n", cp.n}, {"price", cp.price}, {"se", cp.se} });
+
+            json convOtherJson = json::array();
+            for (const auto& cp : convOther)
+                convOtherJson.push_back({ {"n", cp.n}, {"price", cp.price}, {"se", cp.se} });
 
             const json response = {
                 {"bs", {
@@ -257,8 +262,14 @@ int main() {
                     {"stdErr",      mcRes.stdErr},
                     {"modelName",   mcRes.modelName}
                 }},
-                {"convergence",  convJson},
-                {"paths",        pathsJson},
+                {"mcOther", {
+                    {"price",       mcOtherRes.price},
+                    {"stdErr",      mcOtherRes.stdErr},
+                    {"modelName",   mcOtherRes.modelName}
+                }},
+                {"convergence",      convJson},
+                {"convergenceOther", convOtherJson},
+                {"paths",            pathsJson},
                 {"varReduction", useAntithetic ? "antithetic" : "none"}
             };
 
