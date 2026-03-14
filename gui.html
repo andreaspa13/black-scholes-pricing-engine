@@ -1843,13 +1843,13 @@ function pnlColor(t) {
 
 // Cell value formatter: tight but informative
 function fmtCell(v) {
-  const a = Math.abs(v);
-  if (a < 0.1) return v.toFixed(3);
-  return v.toFixed(2);
+  return v.toFixed(1);
 }
 
+const hmState = {};  // stores geometry + data per canvas for tooltip
+
 // Returns the CSS pixel height used (for legend sizing)
-function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig) {
+function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig, isPnl, tooltipLabel) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return 0;
   const dpr  = devicePixelRatio;
@@ -1966,11 +1966,52 @@ function drawHeatmap(canvasId, grid, colorFn, sVals, sigVals, crossS, crossSig) 
       ctx.strokeRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
     }
   }
+  // ── P&L = 0 contour ──
+  if (isPnl) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2 * dpr;
+    ctx.setLineDash([5 * dpr, 4 * dpr]);
+    ctx.beginPath();
+    // Horizontal cell boundaries where sign changes across rows
+    for (let vi = 0; vi < nSig - 1; vi++) {
+      for (let si = 0; si < nS; si++) {
+        if ((grid[vi][si].v < 0) !== (grid[vi + 1][si].v < 0)) {
+          const x = PADL + si * cellW;
+          const y = PADT + (nSig - 1 - vi) * cellH;  // top of lower cell (vi)
+          ctx.moveTo(x, y); ctx.lineTo(x + cellW, y);
+        }
+      }
+    }
+    // Vertical cell boundaries where sign changes across columns
+    for (let si = 0; si < nS - 1; si++) {
+      for (let vi = 0; vi < nSig; vi++) {
+        if ((grid[vi][si].v < 0) !== (grid[vi][si + 1].v < 0)) {
+          const x = PADL + (si + 1) * cellW;
+          const y = PADT + (nSig - 1 - vi) * cellH;
+          ctx.moveTo(x, y); ctx.lineTo(x, y + cellH);
+        }
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Hover tooltip setup ──
+  hmState[canvasId] = {
+    sVals, sigVals, grid, tooltipLabel,
+    PADL_css: PADL / dpr, PADT_css: PADT / dpr,
+    cellW_css: cellW / dpr, cellH_css: cellH / dpr,
+    nS, nSig
+  };
+  canvas.onmousemove = e => showHmTooltip(e, hmState[canvasId]);
+  canvas.onmouseleave = hideHmTooltip;
+
   return size;  // CSS pixel size of the square canvas
 }
 
 // cssH: explicit CSS height to match the adjacent heatmap canvas
-function drawLegend(canvasId, cssH, minV, maxV, colorFn, isPnl) {
+function drawLegend(canvasId, cssH, minV, maxV, colorFn, isPnl, label) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
   const dpr = devicePixelRatio;
@@ -2004,6 +2045,41 @@ function drawLegend(canvasId, cssH, minV, maxV, colorFn, isPnl) {
     ctx.fillText(fmt((minV + maxV) / 2), barW + 3 * dpr, H / 2);        // mid = mid
   }
   ctx.fillText(fmt(minV), barW + 3 * dpr, H - PADB - 4 * dpr);          // bottom = min
+
+  // Vertical label on the right side of the canvas
+  if (label) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(139,148,158,0.7)';
+    ctx.font = `${8 * dpr}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.translate(W - 4 * dpr, PADT + barH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  }
+}
+
+function showHmTooltip(e, st) {
+  const si  = Math.floor((e.offsetX - st.PADL_css) / st.cellW_css);
+  const vit = Math.floor((e.offsetY - st.PADT_css) / st.cellH_css);
+  const vi  = st.nSig - 1 - vit;
+  if (si < 0 || si >= st.nS || vi < 0 || vi >= st.nSig) { hideHmTooltip(); return; }
+  const s  = st.sVals[si];
+  const sig = st.sigVals[vi];
+  const v  = st.grid[vi][si].v;
+  const tip = document.getElementById('hm-tooltip');
+  tip.innerHTML =
+    `Spot: <b>${sym()}${s.toFixed(0)}</b> &nbsp;·&nbsp; ` +
+    `Vol: <b>${(sig * 100).toFixed(0)}%</b> &nbsp;·&nbsp; ` +
+    `${st.tooltipLabel}: <b>${sym()}${v.toFixed(2)}</b>`;
+  tip.style.display = 'block';
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top  = (e.clientY - 10) + 'px';
+}
+
+function hideHmTooltip() {
+  document.getElementById('hm-tooltip').style.display = 'none';
 }
 
 function getHmVal(id, def) {
@@ -2096,15 +2172,16 @@ function computeHeatmaps() {
   if (noteEl) noteEl.innerHTML =
     `K = ${s}${K.toFixed(0)} &nbsp;&middot;&nbsp; r = ${(r * 100).toFixed(1)}% &nbsp;&middot;&nbsp; Expiry = ${fmtExpiry(T)} &nbsp;&middot;&nbsp; <i style="opacity:0.65">fixed from main panel</i>`;
 
-  const h1 = drawHeatmap('hm-call-price', cpGrid,   priceColor, sVals, sigVals, crossS, crossSig);
-  const h2 = drawHeatmap('hm-put-price',  ppGrid,   priceColor, sVals, sigVals, crossS, crossSig);
-  const h3 = drawHeatmap('hm-call-pnl',   cpnlGrid, pnlColor,   sVals, sigVals, crossS, crossSig);
-  const h4 = drawHeatmap('hm-put-pnl',    ppnlGrid, pnlColor,   sVals, sigVals, crossS, crossSig);
+  const ccy = sym();
+  const h1 = drawHeatmap('hm-call-price', cpGrid,   priceColor, sVals, sigVals, crossS, crossSig, false, `Call Price (${ccy})`);
+  const h2 = drawHeatmap('hm-put-price',  ppGrid,   priceColor, sVals, sigVals, crossS, crossSig, false, `Put Price (${ccy})`);
+  const h3 = drawHeatmap('hm-call-pnl',   cpnlGrid, pnlColor,   sVals, sigVals, crossS, crossSig, true,  `Call P&L (${ccy})`);
+  const h4 = drawHeatmap('hm-put-pnl',    ppnlGrid, pnlColor,   sVals, sigVals, crossS, crossSig, true,  `Put P&L (${ccy})`);
 
-  drawLegend('legend-call-price', h1, cpMin,       cpMax,       priceColor, false);
-  drawLegend('legend-put-price',  h2, ppMin,        ppMax,       priceColor, false);
-  drawLegend('legend-call-pnl',   h3, -cpnlRange,   cpnlRange,   pnlColor,   true);
-  drawLegend('legend-put-pnl',    h4, -ppnlRange,   ppnlRange,   pnlColor,   true);
+  drawLegend('legend-call-price', h1, cpMin,      cpMax,      priceColor, false, `Option Price (${ccy})`);
+  drawLegend('legend-put-price',  h2, ppMin,      ppMax,      priceColor, false, `Option Price (${ccy})`);
+  drawLegend('legend-call-pnl',   h3, -cpnlRange, cpnlRange,  pnlColor,   true,  `Profit / Loss (${ccy})`);
+  drawLegend('legend-put-pnl',    h4, -ppnlRange, ppnlRange,  pnlColor,   true,  `Profit / Loss (${ccy})`);
 
   heatmapGenerated = true;
 }
@@ -2124,6 +2201,14 @@ window.addEventListener('resize', () => {
 });
 </script>
 <!-- ── Fullscreen chart overlay ── -->
+<div id="hm-tooltip" style="
+  display:none; position:fixed; pointer-events:none;
+  background:rgba(13,17,23,0.92); border:1px solid rgba(200,210,220,0.18);
+  border-radius:5px; padding:6px 10px; font-size:12px; font-family:monospace;
+  color:rgba(200,210,220,0.9); white-space:nowrap; z-index:1000;
+  box-shadow:0 2px 8px rgba(0,0,0,0.5);
+"></div>
+
 <div id="fs-overlay" onclick="if(event.target===this)closeFullscreen()">
   <div id="fs-inner">
     <div id="fs-header">
