@@ -423,8 +423,7 @@
 
 <header>
   <h1>Options Pricing Engine</h1>
-  <span class="tag">Iteration 1</span>
-  <span class="subtitle">Black-Scholes &nbsp;·&nbsp; Monte Carlo GBM &nbsp;·&nbsp; European options</span>
+  <span class="subtitle">Black-Scholes Analytical &nbsp;·&nbsp; Monte Carlo GBM &nbsp;·&nbsp; European options</span>
   <a class="author" href="https://www.linkedin.com/in/andreaspaschali/" target="_blank" rel="noopener">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M20.45 20.45h-3.554v-5.569c0-1.328-.024-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.354V9h3.414v1.561h.047c.476-.9 1.637-1.85 3.37-1.85 3.602 0 4.267 2.37 4.267 5.455v6.284zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
@@ -629,8 +628,8 @@
           </div>
           <div class="metric-small">
             <div class="metric-label">
-              ρ, Rho
-              <span class="info" data-tip="<b>Rho (ρ)</b><br>How much the option's price changes when the risk-free interest rate moves by 1 percentage point (1%).<br><br>A rho of 0.45 means: rates rise 1% → option gains £0.45. Calls benefit from higher rates (holding the option instead of the stock earns more interest); puts are hurt.">i</span>
+              ρ, Rho (per 1%)
+              <span class="info" data-tip="<b>Rho ρ (per 1% rate move)</b><br>How much the option's price changes when the risk-free interest rate moves by 1 percentage point (1%).<br><br>A rho of 0.34 means: rates rise 1% → option gains £0.34. Calls benefit from higher rates; puts are hurt.">i</span>
             </div>
             <div class="metric-value metric-small" id="bs-rho">-</div>
           </div>
@@ -787,9 +786,12 @@
         <span class="info" data-tip="<b>Spot Range</b><br>The x-axis of the heatmap. Set the minimum and maximum spot price to display. Your current S will be shown as a crosshair.">i</span>
       </label>
       <div class="hm-range">
-        <input type="number" class="hm-input" id="hm-s-min" value="70">
+        <input type="number" class="hm-input" id="hm-s-min" placeholder="auto">
         <span>–</span>
-        <input type="number" class="hm-input" id="hm-s-max" value="130">
+        <input type="number" class="hm-input" id="hm-s-max" placeholder="auto">
+      </div>
+      <div id="hm-s-warn" style="display:none;font-size:11px;color:#e3b341;margin-top:4px">
+        &#9888; S or Strike is outside or near the edge of the range — some values may be near zero across part of the surface.
       </div>
     </div>
 
@@ -826,7 +828,7 @@
   <div class="heatmap-grid">
     <div class="heatmap-panel">
       <div class="hm-panel-title">
-        Call &mdash; Price
+        Call Option Price Surface
         <span class="info" data-tip="<b>Call Price Surface</b><br>Black-Scholes call price across spot (x) and volatility (y). Dark navy = cheap, gold = expensive.<br><br>Higher spot (ITM) and higher vol both push the call price up. The gradient along the x-axis is delta; the gradient along the y-axis is vega.">i</span>
       </div>
       <div class="hm-canvas-row">
@@ -837,7 +839,7 @@
 
     <div class="heatmap-panel">
       <div class="hm-panel-title">
-        Put &mdash; Price
+        Put Option Price Surface
         <span class="info" data-tip="<b>Put Price Surface</b><br>Black-Scholes put price across spot (x) and volatility (y). Put prices increase as spot falls (ITM) or vol rises.<br><br>Compare with the call surface - the asymmetry along the x-axis is the mirror image, enforced by put-call parity.">i</span>
       </div>
       <div class="hm-canvas-row">
@@ -848,7 +850,7 @@
 
     <div class="heatmap-panel">
       <div class="hm-panel-title">
-        Call &mdash; P&amp;L
+        Call P&amp;L Surface
         <span class="info" data-tip="<b>Call P&amp;L Surface</b><br>Your profit or loss on the call at each (S, &sigma;) scenario, given the purchase price you entered.<br><br>White = breakeven (BS price equals your entry). Green = in profit, red = underwater. The zero-P&amp;L contour separates the two.">i</span>
       </div>
       <div class="hm-canvas-row">
@@ -859,7 +861,7 @@
 
     <div class="heatmap-panel">
       <div class="hm-panel-title">
-        Put &mdash; P&amp;L
+        Put P&amp;L Surface
         <span class="info" data-tip="<b>Put P&amp;L Surface</b><br>Your profit or loss on the put at each (S, &sigma;) scenario, given the purchase price you entered.<br><br>A put profits when the stock falls below the strike or vol rises. White = your exact breakeven point.">i</span>
       </div>
       <div class="hm-canvas-row">
@@ -883,9 +885,9 @@ function setCurrency(s) {
   if (!lastResults) return;
   const bs = (optionType === lastResults.pricedType) ? lastResults.bs : lastResults.bsOther;
   const mc = (optionType === lastResults.pricedType) ? lastResults.mc : lastResults.mcOther;
-  document.getElementById('bs-price').textContent = s + bs.price.toFixed(6);
-  document.getElementById('mc-price').textContent  = s + mc.price.toFixed(6);
-  document.getElementById('mc-stderr').textContent = s + mc.stdErr.toFixed(6);
+  document.getElementById('bs-price').textContent = s + bs.price.toFixed(2);
+  document.getElementById('mc-price').textContent  = s + mc.price.toFixed(2);
+  document.getElementById('mc-stderr').textContent = s + mc.stdErr.toFixed(4);
   const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
   const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
   document.getElementById('mc-ci').textContent = `[${s}${lo}, ${s}${hi}]`;
@@ -984,22 +986,22 @@ function setType(t) {
     // Pick the stored result that matches the newly selected type
     const bs = (t === lastResults.pricedType) ? lastResults.bs : lastResults.bsOther;
 
-    document.getElementById('bs-price').textContent = sym() + bs.price.toFixed(6);
+    document.getElementById('bs-price').textContent = sym() + bs.price.toFixed(2);
     document.getElementById('bs-price').className   = 'metric-value ' + col;
-    document.getElementById('bs-delta').textContent = bs.delta.toFixed(6);
+    document.getElementById('bs-delta').textContent = bs.delta.toFixed(4);
     document.getElementById('bs-d1').textContent    = bs.d1.toFixed(4);
     document.getElementById('bs-d2').textContent    = bs.d2.toFixed(4);
-    document.getElementById('bs-gamma').textContent = bs.gamma.toFixed(6);
-    document.getElementById('bs-vega').textContent  = bs.vega.toFixed(6);
-    document.getElementById('bs-theta').textContent = bs.theta.toFixed(6);
-    document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
+    document.getElementById('bs-gamma').textContent = bs.gamma.toFixed(4);
+    document.getElementById('bs-vega').textContent  = bs.vega.toFixed(4);
+    document.getElementById('bs-theta').textContent = bs.theta.toFixed(4);
+    document.getElementById('bs-rho').textContent   = (bs.rho / 100).toFixed(4);
 
     // Swap MC card
     const mc = (t === lastResults.pricedType) ? lastResults.mc : lastResults.mcOther;
     const bsForType = bs; // already selected above
-    document.getElementById('mc-price').textContent  = sym() + mc.price.toFixed(6);
+    document.getElementById('mc-price').textContent  = sym() + mc.price.toFixed(2);
     document.getElementById('mc-price').className    = 'metric-value ' + col;
-    document.getElementById('mc-stderr').textContent = sym() + mc.stdErr.toFixed(6);
+    document.getElementById('mc-stderr').textContent = sym() + mc.stdErr.toFixed(4);
     const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
     const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
     document.getElementById('mc-ci').textContent = `[${sym()}${lo}, ${sym()}${hi}]`;
@@ -1121,7 +1123,7 @@ function drawConvergence(canvas, series, bsPrice) {
   const PL   = Math.round(40 * dpr * Math.min(fs, 1.8));
   const PR   = Math.round(8 * dpr);
   const PT   = Math.round(8 * dpr);
-  const PB   = Math.round(20 * dpr * Math.min(fs, 1.8));
+  const PB   = Math.round(30 * dpr * Math.min(fs, 1.8));
   const pw   = W - PL - PR, ph = H - PT - PB;
 
   const allY  = [...series.map(s => s.price + 2*s.se), ...series.map(s => s.price - 2*s.se), bsPrice];
@@ -1141,15 +1143,30 @@ function drawConvergence(canvas, series, bsPrice) {
     ctx.fillText(fmtAx(v), PL - 4 * dpr, y);
   }
 
-  // X-axis: powers of 10 that fall in range
+  // Y-axis title (rotated)
+  ctx.save();
+  ctx.font = `${fSm}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.45)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.translate(Math.round(9 * dpr * Math.min(fs, 1.8)), PT + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Estimated Option Price', 0, 0);
+  ctx.restore();
+
+  // X-axis: powers of 10 that fall in range + tick labels
+  const xTickY = PT + ph + Math.round(12 * dpr * Math.min(fs, 1.5));
   ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   for (let p = Math.ceil(minL); p <= maxL; p++) {
     const n = Math.pow(10, p), x = px(n);
     ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5 * dpr;
-    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, H - PB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, PT + ph); ctx.stroke();
     ctx.fillStyle = 'rgba(200,210,220,0.55)';
-    ctx.fillText(n >= 1000 ? (n/1000) + 'k' : String(n), x, H - 3 * dpr);
+    ctx.fillText(n >= 1000 ? (n/1000) + 'k' : String(n), x, xTickY);
   }
+
+  // X-axis title
+  ctx.font = `${fSm}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.45)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('Number of Simulation Paths', PL + pw / 2, H - Math.round(2 * dpr));
 
   // BS dashed line
   ctx.strokeStyle = 'rgba(88,166,255,0.6)'; ctx.lineWidth = 1.5 * dpr;
@@ -1224,15 +1241,15 @@ async function runAll() {
   const bsCall  = optionType === 'call' ? bs.price : bsOther.price;
   const bsPut   = optionType === 'put'  ? bs.price : bsOther.price;
 
-  document.getElementById('bs-price').textContent = sym() + bs.price.toFixed(6);
+  document.getElementById('bs-price').textContent = sym() + bs.price.toFixed(2);
   document.getElementById('bs-price').className   = 'metric-value ' + col;
-  document.getElementById('bs-delta').textContent = bs.delta.toFixed(6);
+  document.getElementById('bs-delta').textContent = bs.delta.toFixed(4);
   document.getElementById('bs-d1').textContent    = bs.d1.toFixed(4);
   document.getElementById('bs-d2').textContent    = bs.d2.toFixed(4);
-  document.getElementById('bs-gamma').textContent = bs.gamma.toFixed(6);
-  document.getElementById('bs-vega').textContent  = bs.vega.toFixed(6);
-  document.getElementById('bs-theta').textContent = bs.theta.toFixed(6);
-  document.getElementById('bs-rho').textContent   = bs.rho.toFixed(6);
+  document.getElementById('bs-gamma').textContent = bs.gamma.toFixed(4);
+  document.getElementById('bs-vega').textContent  = bs.vega.toFixed(4);
+  document.getElementById('bs-theta').textContent = bs.theta.toFixed(4);
+  document.getElementById('bs-rho').textContent   = (bs.rho / 100).toFixed(4);
 
   const avActive = res.varReduction === 'antithetic';
   // Update toggle label and convergence chart title to reflect active technique
@@ -1240,9 +1257,9 @@ async function runAll() {
   document.getElementById('conv-title').textContent =
     avActive ? 'MC+AV Convergence to BS Price' : 'MC Convergence to BS Price';
 
-  document.getElementById('mc-price').textContent  = sym() + mc.price.toFixed(6);
+  document.getElementById('mc-price').textContent  = sym() + mc.price.toFixed(2);
   document.getElementById('mc-price').className    = 'metric-value ' + col;
-  document.getElementById('mc-stderr').textContent = sym() + mc.stdErr.toFixed(6);
+  document.getElementById('mc-stderr').textContent = sym() + mc.stdErr.toFixed(4);
   const lo = (mc.price - 1.96 * mc.stdErr).toFixed(4);
   const hi = (mc.price + 1.96 * mc.stdErr).toFixed(4);
   document.getElementById('mc-ci').textContent = `[${sym()}${lo}, ${sym()}${hi}]`;
@@ -1382,7 +1399,7 @@ function showExplain() {
       <p><b>Theta (${bs.theta.toFixed(4)})</b> — Each calendar day that passes costs the holder
       <span class="hl-num">${sym()}${Math.abs(bs.theta).toFixed(4)}</span> in time value, all else equal.
       This decay accelerates as expiry approaches.</p>
-      <p><b>Rho (${bs.rho.toFixed(4)})</b> — A 1 percentage-point rise in the risk-free rate
+      <p><b>Rho (${(bs.rho/100).toFixed(4)} per 1%)</b> — A 1 percentage-point rise in the risk-free rate
       ${bs.rho >= 0 ? 'adds' : 'removes'} <span class="hl-num">${sym()}${(Math.abs(bs.rho)/100).toFixed(4)}</span> to the option price.
       ${type==='call'?'Calls benefit from higher rates (money earns more while you wait)':'Puts are hurt by higher rates (the discounted strike is worth less)'}.
       </p>
@@ -1531,10 +1548,10 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
 
   const fs  = Math.sqrt(H / (200 * dpr));
   const fSm = Math.round(8 * dpr * fs);
-  const PL  = Math.round(8 * dpr);
+  const PL  = Math.round(22 * dpr);                       // room for Y-axis title
   const PR  = Math.round(8 * dpr);
   const PT  = Math.round(20 * dpr * Math.min(fs, 1.8));   // room for S/K labels at top
-  const PB  = Math.round(20 * dpr * Math.min(fs, 1.8));   // room for X-axis labels
+  const PB  = Math.round(32 * dpr * Math.min(fs, 1.8));   // room for X-axis ticks + title
   const pw  = W - PL - PR, ph = H - PT - PB;
 
   const N_PTS = 100;
@@ -1560,17 +1577,32 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
     ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
   });
 
-  // X-axis tick marks + labels (5 spot values)
+  // X-axis tick marks + tick labels (5 spot values)
   ctx.font = `${fSm}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   const xN = 4;
+  const tickLabelY = PT + ph + Math.round(12 * dpr * Math.min(fs, 1.5));
   for (let i = 0; i <= xN; i++) {
     const s = sMin + (sMax - sMin) * i / xN;
     const x = px(s);
     ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 0.5 * dpr;
-    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, H - PB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, PT + ph); ctx.stroke();
     ctx.fillStyle = 'rgba(200,210,220,0.55)';
-    ctx.fillText(fmtAx(s), x, H - 3 * dpr);
+    ctx.fillText(fmtAx(s), x, tickLabelY);
   }
+
+  // X-axis title
+  ctx.font = `${fSm}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.45)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('Spot Price (S)', PL + pw / 2, H - Math.round(2 * dpr));
+
+  // Y-axis title (rotated)
+  ctx.save();
+  ctx.font = `${fSm}px sans-serif`; ctx.fillStyle = 'rgba(200,210,220,0.45)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.translate(Math.round(9 * dpr), PT + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Greek Value (normalised)', 0, 0);
+  ctx.restore();
 
   // Normalise each series independently to [PT+ph*0.05, PT+ph*0.95]
   function normY(vals) {
@@ -1583,14 +1615,14 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
   function vLine(xPos, color, label) {
     ctx.strokeStyle = color; ctx.lineWidth = 1 * dpr;
     ctx.setLineDash([4 * dpr, 3 * dpr]);
-    ctx.beginPath(); ctx.moveTo(xPos, PT); ctx.lineTo(xPos, H - PB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xPos, PT); ctx.lineTo(xPos, PT + ph); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = color; ctx.font = `${fSm}px sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
     ctx.fillText(label, xPos, PT - 3 * dpr);
   }
   vLine(px(S), 'rgba(88,166,255,0.55)', 'S');
-  vLine(px(K), 'rgba(255,215,0,0.55)',  'K');
+  vLine(px(K), 'rgba(255,215,0,0.55)',  'Strike (K)');
 
   // Greek lines
   function drawLine(ys, color) {
@@ -1605,6 +1637,25 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
   drawLine(yg, 'rgba(255,165,0,0.9)');
   drawLine(yv, 'rgba(63,185,80,0.9)');
   drawLine(yt, 'rgba(248,81,73,0.9)');
+
+  // Legend box (top-left, 2×2 grid)
+  const lgColors = ['rgba(88,166,255,0.9)', 'rgba(255,165,0,0.9)', 'rgba(63,185,80,0.9)', 'rgba(248,81,73,0.9)'];
+  const lgLabels = ['Δ Delta', 'Γ Gamma', 'ν Vega', 'Θ Theta'];
+  const lgX = PL + Math.round(6 * dpr);
+  const lgY = PT + Math.round(8 * dpr * fs);
+  const colW = Math.round(60 * dpr * Math.min(fs, 1.5));
+  const rowH = Math.round(13 * dpr * Math.min(fs, 1.5));
+  ctx.font = `${fSm}px sans-serif`; ctx.textBaseline = 'middle';
+  [[0,0],[1,1],[2,0],[3,1]].forEach(([idx, col]) => {
+    const row = idx < 2 ? 0 : 1;
+    const lx = lgX + col * colW;
+    const ly = lgY + row * rowH;
+    ctx.fillStyle = lgColors[idx];
+    ctx.fillRect(lx, ly - Math.round(1 * dpr), Math.round(10 * dpr), Math.round(2.5 * dpr));
+    ctx.fillStyle = 'rgba(200,210,220,0.75)';
+    ctx.textAlign = 'left';
+    ctx.fillText(lgLabels[idx], lx + Math.round(13 * dpr), ly);
+  });
 
   // Values at current S annotated on the right edge
   const atS = bsCalc(S, K, r, sigma, T, type);
@@ -1624,7 +1675,6 @@ function drawGreeksChart(canvas, S, K, r, sigma, T, type) {
   const sorted = annotations.map((a, i) => ({ label: a[0], color: a[1], y: annYs[i] }))
     .sort((a, b) => a.y - b.y);
   sorted.forEach((ann, i) => {
-    // Ensure minimum spacing
     if (i > 0 && ann.y - sorted[i-1].y < fSm * 1.1) ann.y = sorted[i-1].y + fSm * 1.1;
     ctx.fillStyle = ann.color;
     ctx.fillText(ann.label, annX, ann.y);
@@ -1973,8 +2023,21 @@ function computeHeatmaps() {
   const K    = getVal('K');
   const r    = getVal('r') / 100;
   const T    = getVal('T');
-  const sMin = getHmVal('hm-s-min',  70);
-  const sMax = getHmVal('hm-s-max', 130);
+  const S    = getVal('S');
+
+  // Auto-populate spot range if fields are empty
+  const sMinEl = document.getElementById('hm-s-min');
+  const sMaxEl = document.getElementById('hm-s-max');
+  if (!sMinEl.value) sMinEl.value = Math.max(1, Math.round(S * 0.7));
+  if (!sMaxEl.value) sMaxEl.value = Math.round(S * 1.3);
+
+  const sMin = getHmVal('hm-s-min', Math.max(1, Math.round(S * 0.7)));
+  const sMax = getHmVal('hm-s-max', Math.round(S * 1.3));
+
+  // Show warning if S or K is outside or near the edge of the range
+  const warnEl = document.getElementById('hm-s-warn');
+  const nearEdge = S < sMin || S > sMax || K < sMin * 0.9 || K > sMax * 1.1;
+  warnEl.style.display = nearEdge ? 'block' : 'none';
   const vMin = getHmVal('hm-v-min',   5) / 100;
   const vMax = getHmVal('hm-v-max',  50) / 100;
   const callBuy = getHmVal('hm-call-purchase', 0);

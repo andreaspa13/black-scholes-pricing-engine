@@ -91,11 +91,11 @@ PricingResult BlackScholesModel::price(const Option& option,
     switch (option.type()) {
         case OptionType::Call:
             result.theta = (thetaBase - r * discountedStrike * N(d2))  / 365.0;
-            result.rho   =  K * T * discountedStrike * N(d2);
+            result.rho   =  T * discountedStrike * N(d2);
             break;
         case OptionType::Put:
             result.theta = (thetaBase + r * discountedStrike * N(-d2)) / 365.0;
-            result.rho   = -K * T * discountedStrike * N(-d2);
+            result.rho   = -T * discountedStrike * N(-d2);
             break;
     }
 
