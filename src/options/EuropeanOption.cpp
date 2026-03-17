@@ -1,5 +1,5 @@
 #include "options/EuropeanOption.h"
-#include <algorithm> // std::max
+#include <algorithm>
 
 namespace options {
 
@@ -10,7 +10,7 @@ double EuropeanOption::payoff(double spotAtExpiry) const {
         case OptionType::Put:
             return std::max(strike_ - spotAtExpiry, 0.0);
     }
-    return 0.0; // unreachable — silences compiler warning
+    return 0.0; // unreachable (silences compiler warning)
 }
 
-} // namespace options
+} 

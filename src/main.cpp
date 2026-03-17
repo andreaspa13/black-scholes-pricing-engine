@@ -1,15 +1,15 @@
 #include "options/EuropeanOption.h"
 #include "models/BlackScholesModel.h"
-#include "models/MonteCarloModel.h"   // also brings in VarianceReduction enum
+#include "models/MonteCarloModel.h" 
 #include "utils/MarketData.h"
 #include "utils/Benchmark.h"
 #include "utils/ImpliedVol.h"
 
-// ── Iteration 2: template models ──────────────────────────────────────────────
+// Iteration 2: template models 
 #include "v2/BlackScholesV2.h"
 #include "v2/MonteCarloV2.h"
 
-// ── Iteration 3: parallel Monte Carlo ─────────────────────────────────────────
+// Iteration 3: parallel Monte Carlo 
 #include "v3/MonteCarloV3.h"
 
 #include <iostream>
@@ -20,7 +20,7 @@
 
 using namespace options;
 
-// ── Test harness ──────────────────────────────────────────────────────────────
+// Test harness
 
 struct TestResults { int passed = 0; int failed = 0; };
 
