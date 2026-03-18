@@ -1,17 +1,12 @@
 #pragma once
 
-#include "options/Option.h"  // OptionType enum
+#include "options/Option.h" 
 
 #include <concepts>
 
 namespace options::v2 {
 
 /**
- * Compile-time contract for any type that can be priced by our models.
- *
- * This replaces the V1 Option abstract base class as the mechanism for
- * expressing what a model needs from an option.
- *
  * V1 (runtime polymorphism):
  *   Models take const Option& and access the interface through a vtable.
  *   The type constraint (is this actually a EuropeanOption?) is checked at
@@ -36,18 +31,8 @@ concept Priceable = requires(const T& opt, double spot) {
 
 /**
  * Narrows Priceable to types representing European exercise.
- *
- * BlackScholesModel::price() is constrained to EuropeanPriceable.
- * Attempting to compile bs.price(americanOpt, mkt) will fail with a clear
- * concept constraint error, not a runtime exception.
- *
- * Currently identical to Priceable — the distinction is documentation of
- * intent. When AmericanOption is added, it will NOT satisfy EuropeanPriceable
- * (e.g. by adding a negative constraint on early-exercise methods), giving
- * the compiler the information to reject bs.price(americanOpt, mkt) at the
- * call site.
  */
 template<typename T>
 concept EuropeanPriceable = Priceable<T>;
 
-} // namespace options::v2
+}

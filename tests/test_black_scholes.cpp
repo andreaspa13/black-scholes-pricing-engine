@@ -19,7 +19,7 @@ TEST_F(BlackScholesTest, ATMCall) {
     auto r = bs.price(call, m);
     EXPECT_NEAR(r.price,  10.450584, 1e-4);
     EXPECT_NEAR(r.delta,   0.636831, 1e-4);
-    EXPECT_NEAR(r.stdErr,  0.0,      1e-15);
+    EXPECT_NEAR(r.stdErr,  0.0, 1e-15);
 }
 
 // TC2: ATM put — reference values

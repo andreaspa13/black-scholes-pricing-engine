@@ -1,7 +1,7 @@
 #pragma once
 
 #include "v2/Concepts.h"
-#include "models/MonteCarloModel.h"  // VarianceReduction enum
+#include "models/MonteCarloModel.h"  
 #include "utils/MarketData.h"
 #include "utils/PricingResult.h"
 
@@ -41,10 +41,6 @@ namespace options::v2 {
  *    V1: inherited from PricingModel, price() was virtual.
  *    V2: standalone class, no inheritance, no vtable.
  *
- * Remaining known issue (future iteration):
- *   mutable RNG state is still not thread-safe. Two concurrent calls to
- *   price() on the same instance will race on rng_. Fix: thread_local RNG
- *   or per-call seeded instance.
  */
 class MonteCarloModel {
 public:
@@ -146,4 +142,4 @@ private:
     mutable std::normal_distribution<double> dist_;
 };
 
-} // namespace options::v2
+}

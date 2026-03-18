@@ -20,41 +20,25 @@ namespace options::v3 {
  * Builds on V2 (template payoff, no per-path allocation) and adds
  * multi-threaded path simulation using std::thread.
  *
- * --- Thread safety design ---
- *
+ * Thread safety design:
  * V1/V2 stored a mutable std::mt19937 as a member. This is not thread-safe:
  * two concurrent calls to price() on the same instance race on the RNG state.
  * The V2 header documented this as the remaining known issue.
- *
  * V3 fixes this by giving each worker thread its own independent RNG, seeded
- * deterministically from the base seed and the thread index:
- *
- *   thread_seed = seed ^ (thread_id * 2654435761u)
- *
- * 2654435761 is Knuth's multiplicative hash constant. Multiplying the thread
- * index by it spreads nearby indices far apart in seed space, minimising the
- * chance that adjacent seeds initialise the Mersenne Twister to correlated
- * states. The result: deterministic, reproducible, independent streams.
- *
+ * deterministically from the base seed.
  * V3 holds no mutable state. price() is genuinely const and thread-safe.
  *
- * --- Variance merging ---
+ * Variance merging
  *
  * Each thread produces a partial (sum, sumSq, count). These are combined
- * using the parallel variance formula (Chan et al., 1979):
+ * using the parallel variance formula (Chan et al., 1979).
  *
- *   S_combined = Σ_i [ S_i + n_i * (μ_i − μ_combined)² ]
- *
- * where S_i = sumSq_i − n_i * μ_i² is the thread's sum of squared deviations.
- * This is numerically stable: it avoids the catastrophic cancellation that
- * occurs if you naively compute variance as E[X²] − E[X]² on large sums.
- *
- * --- Thread count ---
+ * Thread count 
  *
  * numThreads = 0 (default) uses std::thread::hardware_concurrency(), falling
  * back to 1 if the platform cannot determine core count.
  *
- * --- Speedup expectation ---
+ * Speedup expectation
  *
  * Near-linear with core count for large N (the inner loop is embarrassingly
  * parallel — no shared mutable state, no synchronisation during simulation).
@@ -63,12 +47,11 @@ namespace options::v3 {
  */
 class MonteCarloModel {
 public:
-
     explicit MonteCarloModel(int numPaths  = 100'000,
                              int numSteps  = 1,
                              unsigned seed = 42,
                              VarianceReduction varReduction = VarianceReduction::None,
-                             int numThreads = 0)
+                             int numThreads = 0) 
         : numPaths_(numPaths)
         , numSteps_(numSteps)
         , seed_(seed)
@@ -76,7 +59,7 @@ public:
         , numThreads_(numThreads > 0
                       ? numThreads
                       : static_cast<int>(
-                            std::max(1u, std::thread::hardware_concurrency())))
+                            std::max(1u, std::thread::hardware_concurrency()))) // use hardware concurrency by default
     {
         if (numPaths_ <= 0)  throw std::invalid_argument("MC-V3: numPaths must be positive");
         if (numSteps_ <= 0)  throw std::invalid_argument("MC-V3: numSteps must be positive");
@@ -95,12 +78,13 @@ public:
         if (S <= 0.0)     throw std::domain_error("MC-V3: spot must be positive");
         if (sigma <= 0.0) throw std::domain_error("MC-V3: volatility must be positive");
 
+        // Precompute constants for the geometric Brownian motion simulation
         const double dt        = T / numSteps_;
         const double drift     = r - 0.5 * sigma * sigma;
         const double volSqrtDt = sigma * std::sqrt(dt);
         const double discount  = std::exp(-r * T);
 
-        // ── Partition work across threads ────────────────────────────────────
+        // Partition work across threads
         // For antithetic, we partition pairs rather than individual paths so
         // each thread maintains paired (Z, -Z) draws without coordination.
         const int totalUnits   = (varReduction_ == VarianceReduction::Antithetic)
@@ -201,4 +185,4 @@ private:
     // No mutable RNG member — V3 is genuinely const and thread-safe.
 };
 
-} // namespace options::v3
+} 

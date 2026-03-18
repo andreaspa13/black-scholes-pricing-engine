@@ -33,10 +33,6 @@ namespace options::v2 {
  *
  * The formula is identical to V1. Any benchmark difference is attributable
  * purely to the elimination of dynamic_cast (~5-10 ns/call on x86-64).
- *
- * Implementation in the header because function templates must be visible
- * at the point of instantiation. This is a fundamental constraint of C++
- * templates, not a stylistic choice.
  */
 class BlackScholesModel {
 public:
@@ -103,4 +99,4 @@ private:
     }
 };
 
-} // namespace options::v2
+} 

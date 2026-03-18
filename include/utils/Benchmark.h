@@ -20,30 +20,12 @@ struct BenchmarkResult {
     int    iterations;
 };
 
-/**
- * Minimal benchmarking harness.
- *
- * Usage:
- *   auto result = Benchmark::run("BS call", [&]() {
- *       bs.price(option, market);
- *   }, 10000);
- *   Benchmark::print(result);
- *
- * Design notes:
- *   - Uses high_resolution_clock. On Linux this is typically clock_gettime
- *     with nanosecond resolution; on MSVC it may be lower resolution.
- *   - Does NOT do warm-up runs or attempt to prevent compiler optimisation
- *     of the result. For Iteration 1 baseline measurements this is fine.
- *     A production benchmark would use Google Benchmark or similar.
- *   - The volatile sink trick (DoNotOptimize) is intentionally absent here
- *     to keep the code simple. If you see suspiciously fast results, add it.
- */
 class Benchmark {
 public:
-    template<typename Fn>
+    template<typename Fn> // allowing any callable type (function, lambda, etc.)
     static BenchmarkResult run(const std::string& name, Fn&& fn, int iterations = 1000) {
-        using Clock = std::chrono::high_resolution_clock;
-        using Ns    = std::chrono::duration<double, std::nano>;
+        using Clock = std::chrono::high_resolution_clock; // shorthand for readability
+        using Ns    = std::chrono::duration<double, std::nano>; // shorthand for readability
 
         std::vector<double> times;
         times.reserve(iterations);
@@ -63,7 +45,7 @@ public:
             const double d = t - mean;
             variance += d * d;
         }
-        variance /= static_cast<double>(iterations - 1);
+        variance /= static_cast<double>(iterations - 1); // Standard sample variance with Bessel's correction
 
         const double minT = *std::min_element(times.begin(), times.end());
         const double maxT = *std::max_element(times.begin(), times.end());
@@ -82,4 +64,4 @@ public:
     }
 };
 
-} // namespace options
+} 

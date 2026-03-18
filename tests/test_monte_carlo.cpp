@@ -7,8 +7,6 @@
 using namespace options;
 
 // Helper: asserts MC price lies within maxSigma standard errors of a reference price.
-// This is the correct statistical test for stochastic estimates — exact tolerances
-// are meaningless for MC output.
 static void ExpectWithinSigma(double mcPrice, double refPrice, double mcStdErr,
                                double maxSigma, const std::string& label) {
     const double devs = std::abs(mcPrice - refPrice) / mcStdErr;
