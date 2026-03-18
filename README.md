@@ -84,6 +84,16 @@ The V2→V3 saving comes from 12 independent worker threads each with their own 
 
 ---
 
+## GUI
+
+![Main panel](docs/gui_preview1.png)
+
+![Option price surfaces](docs/gui_preview2.png)
+
+![P&L surfaces](docs/gui_preview3.png)
+
+---
+
 ## Project structure
 
 ```
@@ -111,25 +121,32 @@ gui.html          Self-contained browser GUI
 
 ---
 
-## Build and run
+## Getting started
 
 **Requirements:** CMake 3.16+, GCC with C++20 support (tested: MinGW GCC 15.2 on Windows, GCC 13 on Linux)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+```
 
-# Run the Google Test suite (29 tests)
-./build/options_tests.exe
+### GUI and server
 
-# Run benchmarks and sanity check
-./build/options_main.exe
-
-# Start the pricing server (required for the GUI)
+```bash
 ./build/options_server.exe
 ```
 
-Then open `gui.html` in a browser. The GUI connects to `http://localhost:18080`.
+Open `gui.html` in a browser. The GUI connects to `http://localhost:18080`.
+
+### Tests and benchmarks
+
+```bash
+# Google Test suite (29 tests)
+./build/options_tests.exe
+
+# Benchmarks and sanity check
+./build/options_main.exe
+```
 
 ---
 
