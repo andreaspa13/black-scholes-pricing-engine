@@ -121,7 +121,7 @@ gui.html          Self-contained browser GUI
 
 ---
 
-## Getting started
+## Run instructions
 
 **Requirements:** CMake 3.16+, GCC with C++20 support (tested: MinGW GCC 15.2 on Windows, GCC 13 on Linux)
 
