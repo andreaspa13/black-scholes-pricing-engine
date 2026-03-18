@@ -12,7 +12,7 @@ A C++20 options pricing engine built across deliberate iterations, each targetin
 | C++ design | Iteration 1: runtime polymorphism (virtual dispatch, dynamic_cast). Iteration 2: C++20 concepts replacing the base-class contract, zero-cost abstractions |
 | Performance | Measured 1.5× MC speedup from eliminating virtual `payoff()` dispatch and per-path heap allocation |
 | Systems | HTTP server (cpp-httplib), JSON API (nlohmann/json), browser GUI with live charts |
-| Testing | 38 pass/fail tests covering pricing accuracy, put-call parity, MC convergence, IV round-trips, edge-case rejection |
+| Testing | 29 Google Tests covering pricing accuracy, put-call parity, MC convergence, IV round-trips, V2/V3 regression |
 
 ---
 
@@ -50,22 +50,22 @@ Measured on Windows 11, GCC 15.2 (MinGW), `-O3`. ATM European call, S=100, K=100
 
 | | Mean latency |
 |---|---|
-| V1 (dynamic_cast) | ~300 ns |
-| V2 (template) | ~289 ns |
+| V1 (dynamic_cast) | ~749 ns |
+| V2 (template) | ~377 ns |
 
-The BS gain is modest — `dynamic_cast` on a directly-derived type is fast, and the compiler already devirtualises `price()` when called on a concrete object. The gap widens when models are called through a `PricingModel*` base pointer.
+~2× speedup from eliminating `dynamic_cast`. The gap widens when models are called through a `PricingModel*` base pointer.
 
 ### Monte Carlo per-path cost
 
 | Paths | V1 ns/path | V2 ns/path | V3 ns/path (12 threads) | V1→V3 |
 |---|---|---|---|---|
-| 10 000 | 230 | 124 | 165* | — |
-| 100 000 | 204 | 117 | 32 | **6.4×** |
-| 1 000 000 | ~200 | ~120 | 26 | **~7.7×** |
+| 10 000 | ~598 | ~245 | ~262* | — |
+| 100 000 | ~367 | ~159 | ~35 | **~10.5×** |
+| 1 000 000 | ~367 | ~125 | ~20 | **~18×** |
 
 \* Thread-creation overhead (~1–2 ms) dominates below ~50k paths. The crossover is visible and expected — it is shown intentionally to demonstrate understanding of parallelism costs.
 
-The V1→V2 saving (~80 ns/path) decomposes as:
+The V1→V2 saving (~230–350 ns/path) decomposes as:
 - ~30–40 ns — `std::vector<double>` allocation in `generatePath()` (eliminated by inlining path into a scalar)
 - ~3–5 ns — virtual `payoff()` dispatch × 1 call/path (eliminated by template instantiation)
 
@@ -93,13 +93,19 @@ include/
   v2/             V2 Concepts.h, BlackScholesV2.h, MonteCarloV2.h (templates)
   v3/             V3 MonteCarloV3.h (parallel, per-thread RNG, Chan variance merge)
   utils/          PricingResult, MarketData, ImpliedVol, Benchmark
-  vendor/         cpp-httplib v0.37, nlohmann/json v3.11.3 (single headers)
+  vendor/         cpp-httplib, nlohmann/json (single headers)
 src/
   models/         V1 model implementations
   options/        EuropeanOption payoff
   utils/          ImpliedVol solver implementation
   server.cpp      HTTP server (options_server binary)
-  main.cpp        Test suite + V1/V2 benchmark comparison
+  main.cpp        Sanity check + V1/V2/V3 benchmark comparison
+tests/
+  test_black_scholes.cpp   BS pricing, Greeks, put-call parity
+  test_monte_carlo.cpp     MC convergence, antithetic variates
+  test_implied_vol.cpp     IV round-trips, edge-case rejection
+  test_v2.cpp              V2 regression against V1
+  test_v3.cpp              V3 parallel MC regression
 gui.html          Self-contained browser GUI
 ```
 
@@ -113,7 +119,10 @@ gui.html          Self-contained browser GUI
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
-# Run test suite and V1 vs V2 benchmarks
+# Run the Google Test suite (29 tests)
+./build/options_tests.exe
+
+# Run benchmarks and sanity check
 ./build/options_main.exe
 
 # Start the pricing server (required for the GUI)
@@ -126,12 +135,13 @@ Then open `gui.html` in a browser. The GUI connects to `http://localhost:18080`.
 
 ## Test coverage
 
-38 tests across:
+29 Google Tests across 5 files:
 - ATM / ITM / OTM call and put prices against known reference values (1e-4 tolerance)
 - Put-call parity to machine precision (< 1e-12 error)
 - Delta identity: Δ_call − Δ_put = 1
-- MC convergence within 3σ of BS price (500k paths)
+- MC convergence within 3σ of BS price (500k paths, fixed seed)
 - Antithetic variates: convergence check + variance reduction verified
 - IV round-trips: recover input σ to 1e-6 across ATM, ITM, OTM, high-vol cases
-- IV edge-case rejection: sub-intrinsic price, above upper bound
-- V2 correctness: BS V2 matches V1 to 1e-14 on all six outputs (price, Δ, Γ, ν, Θ, ρ)
+- IV edge-case rejection: sub-intrinsic price returns `converged=false`
+- V2 regression: BS V2 matches V1 to 1e-14 on all six outputs (price, Δ, Γ, ν, Θ, ρ)
+- V3 regression: parallel MC converges statistically to BS
