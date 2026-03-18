@@ -1,6 +1,3 @@
-# Claude Code internal
-.claude/
-
 # Build output
 build/
 *.exe
@@ -31,3 +28,6 @@ desktop.ini
 ANNOTATIONS.md
 EXECUTION_WALKTHROUGH.md
 BUILD_GUIDE.md
+
+# Local dev tools
+.claude/
