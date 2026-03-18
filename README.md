@@ -4,6 +4,16 @@ A C++20 options pricing engine built across deliberate iterations, each targetin
 
 ---
 
+## GUI
+
+![Main panel](docs/gui_preview1.png)
+
+![Option price surfaces](docs/gui_preview2.png)
+
+![P&L surfaces](docs/gui_preview3.png)
+
+---
+
 ## What it demonstrates
 
 | Area | Detail |
@@ -81,16 +91,6 @@ The V2→V3 saving comes from 12 independent worker threads each with their own 
 - **Implied volatility solver** — Newton-Raphson with bisection fallback, Brenner-Subrahmanyam initial guess, no-arbitrage bounds checking
 - **HTTP server** — `POST /price` and `POST /iv` endpoints, CORS-enabled for local file:// GUI
 - **Interactive GUI** — BS result card with all Greeks, MC result card, convergence chart, GBM path simulation, BS price/PnL heatmaps, IV input panel
-
----
-
-## GUI
-
-![Main panel](docs/gui_preview1.png)
-
-![Option price surfaces](docs/gui_preview2.png)
-
-![P&L surfaces](docs/gui_preview3.png)
 
 ---
 
