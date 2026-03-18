@@ -5,7 +5,7 @@
 namespace options {
 class BlackScholesModel : public PricingModel {
 public:
-    PricingResult price(const Option& option,const MarketData& market) const override;
+    PricingResult price(const Option& option, const MarketData& market) const override;
 
 private:
     double N(double x) const;

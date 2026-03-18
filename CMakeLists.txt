@@ -38,7 +38,7 @@ target_include_directories(options_engine PUBLIC include) # Makes include availa
 add_executable(options_main src/main.cpp) # Compile main.cpp into an executable named options_main
 target_link_libraries(options_main PRIVATE options_engine)
 if(WIN32)
-    target_link_libraries(options_main PRIVATE -lpthread) #V3 uses std::thread
+    target_link_libraries(options_main PRIVATE -lpthread) # V3 uses std::thread
 endif()
 
 # Build type defaults

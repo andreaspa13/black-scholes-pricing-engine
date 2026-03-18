@@ -4,15 +4,15 @@
 // cpp-httplib requires Windows 10+ API surface (CreateFile2, etc.)
 #define _WIN32_WINNT 0x0A00
 
-#include "vendor/httplib.h"
-#include "vendor/json.hpp"
-
 #include "options/EuropeanOption.h"
 #include "models/BlackScholesModel.h"
 #include "models/MonteCarloModel.h"
 #include "utils/MarketData.h"
 #include "utils/PricingResult.h"
 #include "utils/ImpliedVol.h"
+
+#include "vendor/httplib.h"
+#include "vendor/json.hpp"
 
 #include <cmath>
 #include <vector>
