@@ -28,27 +28,27 @@ A C++20 options pricing engine built across deliberate iterations, each targetin
 
 ## Iterations
 
-### Iteration 1 — Runtime polymorphism
+### Iteration 1 - Runtime polymorphism
 
 `include/models/` and `src/models/`
 
 The classic OOP design. `Option` is an abstract base with a pure virtual `payoff()`. `PricingModel` is an abstract base with a pure virtual `price()`. `BlackScholesModel` receives a `const Option&` and uses `dynamic_cast` to verify it is a `EuropeanOption` at runtime, throwing on failure.
 
-**Deliberate design smells (interview talking points):**
-- `dynamic_cast` in `BlackScholesModel::price()` — runtime type check that throws; the compiler cannot reject a wrong option type
-- Virtual `payoff()` called inside the MC inner loop — vtable dispatch on every path
-- `generatePath()` allocates a `std::vector<double>` per path — dominant allocation cost at ~30–40 ns/path
+**Deliberate design smells:**
+- `dynamic_cast` in `BlackScholesModel::price()` - runtime type check that throws; the compiler cannot reject a wrong option type
+- Virtual `payoff()` called inside the MC inner loop - vtable dispatch on every path
+- `generatePath()` allocates a `std::vector<double>` per path - dominant allocation cost at ~30–40 ns/path
 
-### Iteration 2 — Compile-time polymorphism
+### Iteration 2 - Compile-time polymorphism
 
 `include/v2/`
 
-Replaces the inheritance hierarchy with C++20 concepts. `Priceable` and `EuropeanPriceable` express the same contract as the V1 base classes, but the constraint is checked by the compiler at the call site — a wrong option type is a compile error, not a runtime exception.
+Replaces the inheritance hierarchy with C++20 concepts. `Priceable` and `EuropeanPriceable` express the same contract as the V1 base classes, but the constraint is checked by the compiler at the call site - a wrong option type is a compile error, not a runtime exception.
 
 `BlackScholesModel::price<Opt>()` and `MonteCarloModel::price<Opt>()` are constrained function templates. The concrete `Opt` type is known at compile time, enabling:
-- **No dynamic_cast** — the type check is free
-- **No virtual payoff() dispatch** — the compiler inlines the payoff expression directly into the MC loop
-- **No per-path vector allocation** — path simulation is accumulated in a scalar double; the heap buffer is gone
+- **No dynamic_cast** - the type check is free
+- **No virtual payoff() dispatch** - the compiler inlines the payoff expression directly into the MC loop
+- **No per-path vector allocation** - path simulation is accumulated in a scalar double; the heap buffer is gone
 
 ---
 
@@ -69,15 +69,15 @@ Measured on Windows 11, GCC 15.2 (MinGW), `-O3`. ATM European call, S=100, K=100
 
 | Paths | V1 ns/path | V2 ns/path | V3 ns/path (12 threads) | V1→V3 |
 |---|---|---|---|---|
-| 10 000 | ~598 | ~245 | ~262* | — |
+| 10 000 | ~598 | ~245 | ~262* | - |
 | 100 000 | ~367 | ~159 | ~35 | **~10.5×** |
 | 1 000 000 | ~367 | ~125 | ~20 | **~18×** |
 
-\* Thread-creation overhead (~1–2 ms) dominates below ~50k paths. The crossover is visible and expected — it is shown intentionally to demonstrate understanding of parallelism costs.
+\* Thread-creation overhead (~1–2 ms) dominates below ~50k paths. The crossover is visible and expected - it is shown intentionally to demonstrate understanding of parallelism costs.
 
 The V1→V2 saving (~230–350 ns/path) decomposes as:
-- ~30–40 ns — `std::vector<double>` allocation in `generatePath()` (eliminated by inlining path into a scalar)
-- ~3–5 ns — virtual `payoff()` dispatch × 1 call/path (eliminated by template instantiation)
+- ~30–40 ns - `std::vector<double>` allocation in `generatePath()` (eliminated by inlining path into a scalar)
+- ~3–5 ns - virtual `payoff()` dispatch × 1 call/path (eliminated by template instantiation)
 
 The V2→V3 saving comes from 12 independent worker threads each with their own seeded RNG, results merged via Chan's parallel variance formula.
 
@@ -85,12 +85,12 @@ The V2→V3 saving comes from 12 independent worker threads each with their own 
 
 ## Features
 
-- **Black-Scholes closed-form** — price, Delta, Gamma, Vega, Theta, Rho
-- **Monte Carlo GBM simulation** — exact log-normal discretisation, Bessel-corrected standard error, 95% CI
-- **Antithetic variates** — variance reduction toggle; pair-average estimator with correct stdErr
-- **Implied volatility solver** — Newton-Raphson with bisection fallback, Brenner-Subrahmanyam initial guess, no-arbitrage bounds checking
-- **HTTP server** — `POST /price` and `POST /iv` endpoints, CORS-enabled for local file:// GUI
-- **Interactive GUI** — BS result card with all Greeks, MC result card, convergence chart, GBM path simulation, BS price/PnL heatmaps, IV input panel
+- **Black-Scholes closed-form** - price, Delta, Gamma, Vega, Theta, Rho
+- **Monte Carlo GBM simulation** - exact log-normal discretisation, Bessel-corrected standard error, 95% CI
+- **Antithetic variates** - variance reduction toggle; pair-average estimator with correct stdErr
+- **Implied volatility solver** - Newton-Raphson with bisection fallback, Brenner-Subrahmanyam initial guess, no-arbitrage bounds checking
+- **HTTP server** - `POST /price` and `POST /iv` endpoints, CORS-enabled for local file:// GUI
+- **Interactive GUI** - BS result card with all Greeks, MC result card, convergence chart, GBM path simulation, BS price/PnL heatmaps, IV input panel
 
 ---
 
@@ -116,7 +116,8 @@ tests/
   test_implied_vol.cpp     IV round-trips, edge-case rejection
   test_v2.cpp              V2 regression against V1
   test_v3.cpp              V3 parallel MC regression
-gui.html          Self-contained browser GUI
+gui.html                  Browser GUI (requires options_server)
+gui-standalone-demo.html  Standalone JS demo (no server required)
 ```
 
 ---
@@ -137,6 +138,10 @@ cmake --build build
 ```
 
 Open `gui.html` in a browser. The GUI connects to `http://localhost:18080`.
+
+### Standalone demo (no build required)
+
+Open `gui-standalone-demo.html` directly in a browser - no server or compilation needed. Pricing is computed in JavaScript (analytical Black-Scholes, Box-Muller Monte Carlo). This is a front-end demo only; it is not connected to the C++ engine. The real engine is significantly faster: sub-100 ns per Black-Scholes evaluation and ~70-100 ns per Monte Carlo path versus several microseconds in JavaScript.
 
 ### Tests and benchmarks
 

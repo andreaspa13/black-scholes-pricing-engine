@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Options Pricing Engine</title>
+<title>Options Pricing Engine – JS Demo</title>
 <style>
   :root {
     --bg:       #0d1117;
@@ -455,6 +455,16 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Standalone demo banner ── */
+  .demo-banner {
+    display: flex; align-items: flex-start; gap: 12px;
+    background: rgba(247,129,102,0.08); border: 1px solid rgba(247,129,102,0.35);
+    border-radius: 8px; padding: 13px 16px; margin-bottom: 20px;
+    font-size: 13px; color: var(--text-dim); line-height: 1.55;
+  }
+  .demo-banner-icon { color: var(--warn); font-size: 17px; flex-shrink: 0; margin-top: 1px; }
+  .demo-banner strong { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -482,6 +492,17 @@
     Andreas Paschali
   </a>
 </header>
+
+<div class="demo-banner">
+  <span class="demo-banner-icon">⚠</span>
+  <div>
+    <strong>Frontend demo only — not connected to the C++ pricing engine.</strong>
+    Pricing is computed in JavaScript (analytical Black-Scholes, Box-Muller Monte Carlo simulation).
+    The real GUI, driven by the compiled C++ engine, is significantly faster: sub-100 ns per
+    Black-Scholes evaluation and ~70 ns per Monte Carlo path, versus several microseconds here.
+    To run the real engine, clone the repo and follow the instructions in the README.
+  </div>
+</div>
 
 <div id="server-error"></div>
 
@@ -1259,6 +1280,138 @@ function drawConvergence(canvas, series, bsPrice) {
   ctx.fillText('MC ' + sym() + last.price.toFixed(4), px(last.n) - 4 * dpr, py(last.price) - 4 * dpr);
 }
 
+// ── Standalone demo: JS pricing functions ─────────────────────────────────────
+
+// Box-Muller normal sampler
+function randn() {
+  let u;
+  do { u = Math.random(); } while (u === 0);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+// Generate multi-step GBM paths for the visualisation chart
+const DEMO_NSTEPS = 50;
+function generateVisPaths(S, r, sigma, T, numPaths) {
+  const dt    = T / DEMO_NSTEPS;
+  const drift = (r - 0.5 * sigma * sigma) * dt;
+  const vol   = sigma * Math.sqrt(dt);
+  const paths = [];
+  for (let p = 0; p < numPaths; p++) {
+    const path = [S];
+    for (let i = 1; i <= DEMO_NSTEPS; i++)
+      path.push(path[i - 1] * Math.exp(drift + vol * randn()));
+    paths.push(path);
+  }
+  return paths;
+}
+
+// Build log-spaced convergence series from an array of payoffs
+function buildConvergenceSeries(payoffs, disc) {
+  const n = payoffs.length;
+  if (n < 2) return [];
+  // Prefix sums for O(1) slice stats
+  const cum = new Float64Array(n + 1);
+  const sq  = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    cum[i + 1] = cum[i] + payoffs[i];
+    sq[i + 1]  = sq[i]  + payoffs[i] * payoffs[i];
+  }
+  const series  = [];
+  const seen    = new Set();
+  const nPts    = 20;
+  const logMin  = Math.log10(Math.min(50, n));
+  const logMax  = Math.log10(n);
+  for (let i = 0; i <= nPts; i++) {
+    const k = Math.max(2, Math.min(n,
+      Math.round(Math.pow(10, logMin + (logMax - logMin) * i / nPts))));
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const mean     = cum[k] / k;
+    const variance = sq[k] / k - mean * mean;
+    series.push({ n: k, price: disc * mean,
+                  se: disc * Math.sqrt(Math.max(0, variance) / k) });
+  }
+  return series;
+}
+
+// Full MC run: both option types, convergence series, and vis paths
+function runMCFull(S, K, r, sigma, T, type, N, numVis, useAntithetic) {
+  const disc   = Math.exp(-r * T);
+  const drift  = (r - 0.5 * sigma * sigma) * T;
+  const volSqT = sigma * Math.sqrt(T);
+  const other  = type === 'call' ? 'put' : 'call';
+  const payoff = (st, t) => t === 'call' ? Math.max(st - K, 0) : Math.max(K - st, 0);
+
+  const pMain = [], pOther = [];
+  if (useAntithetic) {
+    for (let i = 0; i < N; i += 2) {
+      const z   = randn();
+      const st1 = S * Math.exp(drift + volSqT * z);
+      const st2 = S * Math.exp(drift - volSqT * z);
+      pMain.push( (payoff(st1, type)  + payoff(st2, type))  / 2);
+      pOther.push((payoff(st1, other) + payoff(st2, other)) / 2);
+    }
+  } else {
+    for (let i = 0; i < N; i++) {
+      const st = S * Math.exp(drift + volSqT * randn());
+      pMain.push(payoff(st, type));
+      pOther.push(payoff(st, other));
+    }
+  }
+
+  const stats = (ps) => {
+    const k = ps.length;
+    let s = 0, s2 = 0;
+    for (const p of ps) { s += p; s2 += p * p; }
+    const mean = s / k;
+    const sd   = Math.sqrt(Math.max(0, s2 / k - mean * mean));
+    return { price: disc * mean, stdErr: disc * sd / Math.sqrt(k) };
+  };
+
+  return {
+    mc:               stats(pMain),
+    mcOther:          stats(pOther),
+    convergence:      buildConvergenceSeries(pMain,  disc),
+    convergenceOther: buildConvergenceSeries(pOther, disc),
+    paths:            generateVisPaths(S, r, sigma, T, numVis),
+    varReduction:     useAntithetic ? 'antithetic' : 'none',
+  };
+}
+
+// IV solver: Newton-Raphson with bisection fallback
+function computeIVLocal(S, K, r, T, type, marketPrice) {
+  const rawVega = (sig) => {
+    if (sig < 1e-8 || T < 1e-6) return 0;
+    const sqrtT = Math.sqrt(T);
+    const d1 = (Math.log(S / K) + (r + 0.5 * sig * sig) * T) / (sig * sqrtT);
+    return S * Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI) * sqrtT;
+  };
+  const f = (sig) => bsCalc(S, K, r, sig, T, type).price - marketPrice;
+  if (f(1e-6) * f(10) > 0)
+    return { converged: false, message: 'Market price is outside the model range for any positive volatility' };
+  // Newton-Raphson
+  let sig = 0.25;
+  for (let i = 0; i < 100; i++) {
+    const err = f(sig);
+    if (Math.abs(err) < 1e-8)
+      return { converged: true, iv: sig, message: `Converged in ${i + 1} iterations (Newton-Raphson)` };
+    const vg = rawVega(sig);
+    if (vg < 1e-10) break;
+    const next = sig - err / vg;
+    if (next <= 1e-6 || next > 10) break;
+    sig = next;
+  }
+  // Bisection fallback
+  let lo = 1e-6, hi = 10;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    if (Math.abs(hi - lo) < 1e-8)
+      return { converged: true, iv: mid, message: `Converged in ${i + 1} iterations (bisection)` };
+    if (f(mid) * f(lo) < 0) hi = mid; else lo = mid;
+  }
+  return { converged: false, message: 'Solver did not converge — check input values' };
+}
+
 // ── Run ───────────────────────────────────────────────────────────────────────
 async function runAll() {
   const btn = document.getElementById('run-btn');
@@ -1270,33 +1423,16 @@ async function runAll() {
   const col = optionType === 'call' ? 'call' : 'put';
   const useAntithetic = document.getElementById('use-antithetic').checked;
 
-  let res;
-  try {
-    const response = await fetch('http://localhost:18080/price', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ S, K, r, sigma, T, type: optionType,
-                             numPaths: Math.round(N), numVisPaths: Math.round(vis),
-                             useAntithetic })
-    });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error || 'Server returned HTTP ' + response.status);
-    }
-    res = await response.json();
-  } catch (e) {
-    const banner = document.getElementById('server-error');
-    banner.innerHTML = `<b>Cannot reach pricing server:</b> ${e.message}<br>
-      Make sure <code>options_server.exe</code> is running, then click Run Pricing again.`;
-    banner.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Run Pricing';
-    document.getElementById('explain-btn').disabled = !lastResults;
-    return;
-  }
-  document.getElementById('server-error').style.display = 'none';
+  // Yield briefly so the "Running…" button text renders before computation
+  await new Promise(resolve => setTimeout(resolve, 10));
 
-  const bs      = res.bs;
-  const bsOther = res.bsOther;
+  // ── Analytical Black-Scholes ──────────────────────────────────────────────
+  const bs      = bsCalc(S, K, r, sigma, T, optionType);
+  const bsOther = bsCalc(S, K, r, sigma, T, optionType === 'call' ? 'put' : 'call');
+
+  // ── JavaScript Monte Carlo (Box-Muller GBM) ───────────────────────────────
+  const res = runMCFull(S, K, r, sigma, T, optionType, Math.round(N), Math.round(vis), useAntithetic);
+
   const mc      = res.mc;
   const mcOther = res.mcOther;
   const bsCall  = optionType === 'call' ? bs.price : bsOther.price;
@@ -1312,7 +1448,7 @@ async function runAll() {
   document.getElementById('bs-theta').textContent = bs.theta.toFixed(4);
   document.getElementById('bs-rho').textContent   = (bs.rho / 100).toFixed(4);
 
-  const avActive = res.varReduction === 'antithetic';
+  const avActive = useAntithetic;
   // Update toggle label and convergence chart title to reflect active technique
   document.getElementById('vr-label').textContent = avActive ? 'Antithetic variates' : 'Off';
   document.getElementById('conv-title').textContent =
@@ -1338,17 +1474,21 @@ async function runAll() {
   err < 1e-8 ? (st.textContent = 'Parity holds', st.className = 'parity-status ok')
              : (st.textContent = 'Parity error!', st.className = 'parity-status bad');
 
-  // Charts — data comes directly from the server
+  // Charts
   drawPaths(document.getElementById('path-canvas'), res.paths, S, K);
   drawConvergence(document.getElementById('conv-canvas'), res.convergence, bs.price);
   drawGreeksChart(document.getElementById('greeks-canvas'), S, K, r, sigma, T, optionType);
   drawDecayChart(document.getElementById('decay-canvas'),  S, K, r, sigma, T);
 
   // Register fullscreen drawers (closures over current run parameters)
-  fsConfig['paths']  = { title: 'GBM Path Simulation',      fn: cvs => drawPaths(cvs, res.paths, S, K) };
-  fsConfig['conv']   = { title: 'MC Convergence to BS Price', fn: cvs => drawConvergence(cvs, res.convergence, bs.price) };
-  fsConfig['greeks'] = { title: 'Greeks Profile',            fn: cvs => drawGreeksChart(cvs, S, K, r, sigma, T, optionType) };
-  fsConfig['decay']  = { title: 'Theta Decay',               fn: cvs => drawDecayChart(cvs, S, K, r, sigma, T) };
+  fsConfig['paths']  = { title: 'GBM Path Simulation',
+    fn: cvs => drawPaths(cvs, res.paths, S, K) };
+  fsConfig['conv']   = { title: avActive ? 'MC+AV Convergence to BS Price' : 'MC Convergence to BS Price',
+    fn: cvs => drawConvergence(cvs, res.convergence, bs.price) };
+  fsConfig['greeks'] = { title: 'Greeks Profile',
+    fn: cvs => drawGreeksChart(cvs, S, K, r, sigma, T, optionType) };
+  fsConfig['decay']  = { title: 'Theta Decay',
+    fn: cvs => drawDecayChart(cvs, S, K, r, sigma, T) };
 
   // Attach N_d2 for the explain modal's probITM display
   bs.N_d2 = normCDF(bs.d2);
@@ -1521,7 +1661,7 @@ function updateIVMid() {
   document.getElementById('iv-mid-display').textContent = mid !== null ? mid.toFixed(3) : '—';
 }
 
-async function computeIV() {
+function computeIV() {
   const bid = parseFloat(document.getElementById('iv-bid').value);
   const ask = parseFloat(document.getElementById('iv-ask').value);
   if (isNaN(bid) || isNaN(ask) || bid <= 0 || ask <= 0) {
@@ -1539,27 +1679,12 @@ async function computeIV() {
   const btn = document.getElementById('iv-btn');
   btn.disabled = true; btn.textContent = 'Solving…';
 
-  const S     = getVal('S');
-  const K     = getVal('K');
-  const r     = getVal('r') / 100;
-  const sigma = getVal('sigma') / 100;   // unused by solver but kept for context
-  const T     = getVal('T');
+  const S = getVal('S');
+  const K = getVal('K');
+  const r = getVal('r') / 100;
+  const T = getVal('T');
 
-  let data;
-  try {
-    const response = await fetch('http://localhost:18080/iv', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ S, K, r, T, type: optionType, marketPrice })
-    });
-    data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
-  } catch (e) {
-    document.getElementById('iv-output').innerHTML =
-      `<div class="iv-error">Server error: ${e.message}</div>`;
-    btn.disabled = false; btn.textContent = 'Solve IV';
-    return;
-  }
+  const data = computeIVLocal(S, K, r, T, optionType, marketPrice);
 
   btn.disabled = false; btn.textContent = 'Solve IV';
 
@@ -1854,12 +1979,12 @@ function fmtExpiry(T) {
   return Math.round(T * 12) + 'M';
 }
 
-// BS formula in JS — used only for the heatmap grid (display, not pricing)
+// BS formula in JS — used for heatmap, Greeks chart, decay chart, and (in demo) live pricing
 function bsCalc(S, K, r, sigma, T, type) {
   if (T < 1e-6 || sigma < 1e-8 || S <= 0) {
     const price = type === 'call' ? Math.max(S - K, 0) : Math.max(K - S, 0);
     return { price, delta: type === 'call' ? (S > K ? 1 : 0) : (S < K ? -1 : 0),
-             gamma: 0, vega: 0, theta: 0 };
+             d1: 0, d2: 0, gamma: 0, vega: 0, theta: 0, rho: 0 };
   }
   const sqrtT = Math.sqrt(T);
   const d1    = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
@@ -1875,7 +2000,11 @@ function bsCalc(S, K, r, sigma, T, type) {
   const theta = type === 'call'
     ? (-S * npd1 * sigma / (2 * sqrtT) - r * Ke * normCDF(d2))  / 365
     : (-S * npd1 * sigma / (2 * sqrtT) + r * Ke * normCDF(-d2)) / 365;
-  return { price, delta, gamma, vega, theta };
+  // rho per unit r (display divides by 100 to get per 1% move)
+  const rho = type === 'call'
+    ?  K * T * Ke * normCDF(d2)
+    : -K * T * Ke * normCDF(-d2);
+  return { price, delta, d1, d2, gamma, vega, theta, rho };
 }
 
 // Colour helpers
