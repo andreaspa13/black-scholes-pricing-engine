@@ -50,6 +50,14 @@ Replaces the inheritance hierarchy with C++20 concepts. `Priceable` and `Europea
 - **No virtual payoff() dispatch** - the compiler inlines the payoff expression directly into the MC loop
 - **No per-path vector allocation** - path simulation is accumulated in a scalar double; the heap buffer is gone
 
+### Iteration 3 - Parallel Monte Carlo
+
+`include/v3/`
+
+MC only - Black-Scholes is a closed-form evaluation, nothing to parallelise. Splits path simulation across `std::thread` workers, one RNG per thread seeded deterministically from the base seed. This fixes the V1/V2 design smell where a `mutable std::mt19937` member made concurrent calls unsafe - `price()` is now genuinely `const` with no shared state.
+
+Each thread accumulates its own `(sum, sumSq, count)`. After join, results are merged using Chan et al. (1979) to recover the combined variance without a second pass. Defaults to `hardware_concurrency()` threads; speedup is near-linear with core count once path count is large enough to amortise thread overhead.
+
 ---
 
 ## Benchmark results
