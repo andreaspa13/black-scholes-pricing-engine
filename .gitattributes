@@ -1,2 +1,3 @@
 gui.html linguist-vendored
+gui-standalone-demo.html linguist-vendored
 include/vendor/** linguist-vendored
